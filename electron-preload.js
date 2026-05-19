@@ -264,6 +264,34 @@ contextBridge.exposeInMainWorld('electron', {
     };
   },
 
+  // Listen for Cloudflare tunnel becoming ready (cross-network URL).
+  onRemoteTunnelReady: (callback) => {
+    const subscription = (event, data) => callback(data);
+    ipcRenderer.on('remote-server-tunnel-ready', subscription);
+    return () => {
+      ipcRenderer.removeListener('remote-server-tunnel-ready', subscription);
+    };
+  },
+
+  // Auto-updater
+  onUpdateAvailable: (callback) => {
+    const subscription = (event, info) => callback(info);
+    ipcRenderer.on('update-available', subscription);
+    return () => ipcRenderer.removeListener('update-available', subscription);
+  },
+  onUpdateProgress: (callback) => {
+    const subscription = (event, progress) => callback(progress);
+    ipcRenderer.on('update-download-progress', subscription);
+    return () => ipcRenderer.removeListener('update-download-progress', subscription);
+  },
+  onUpdateDownloaded: (callback) => {
+    const subscription = (event, info) => callback(info);
+    ipcRenderer.on('update-downloaded', subscription);
+    return () => ipcRenderer.removeListener('update-downloaded', subscription);
+  },
+  downloadUpdate: () => ipcRenderer.send('update-download'),
+  quitAndInstallUpdate: () => ipcRenderer.send('update-quit-and-install'),
+
   // Listen for remote server stopped event
   onRemoteServerStopped: (callback) => {
     const subscription = () => callback();

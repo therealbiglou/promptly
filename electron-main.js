@@ -8,6 +8,8 @@ const isDev = require('electron-is-dev');
 const mammoth = require('mammoth');
 const express = require('express');
 const os = require('os');
+const { spawn } = require('child_process');
+const { autoUpdater } = require('electron-updater');
 // Note: pdf-parse is lazy-loaded only when needed to avoid DOMMatrix errors
 
 // Note: GPU acceleration is REQUIRED for transparent windows on Windows
@@ -19,6 +21,8 @@ let presenterWindowBounds = { width: 1920, height: 1080, x: 100, y: 100 }; // De
 let presenterBeforeFullscreenBounds = null; // Store bounds before fullscreen
 let presenterTargetDisplayId = null; // Display id to move presenter to before going fullscreen (null = current)
 let suppressFullscreenNotification = false; // True while the move-while-fullscreen dance is running
+let presenterIsFullscreen = false; // Source of truth for fullscreen state (Electron's isFullScreen() is flaky on Windows)
+let cloudflaredProcess = null; // Spawned cloudflared tunnel subprocess
 
 // Remote control server
 let remoteServer = null;
@@ -305,16 +309,18 @@ function createPresenterWindow() {
   // IPC handler before setFullScreen(true), and continuously by the resize/move
   // debounce while not fullscreen.
   presenterWindow.on('enter-full-screen', () => {
-    if (presenterWindow && !presenterWindow.isDestroyed() && !suppressFullscreenNotification) {
-      presenterWindow.webContents.send('presenter-fullscreen-changed', true);
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('presenter-fullscreen-changed', true);
-      }
+    if (!presenterWindow || presenterWindow.isDestroyed()) return;
+    presenterIsFullscreen = true;
+    if (suppressFullscreenNotification) return;
+    presenterWindow.webContents.send('presenter-fullscreen-changed', true);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('presenter-fullscreen-changed', true);
     }
   });
 
   presenterWindow.on('leave-full-screen', () => {
     if (!presenterWindow || presenterWindow.isDestroyed()) return;
+    presenterIsFullscreen = false;
     // During the move-while-fullscreen dance, skip both the notification and
     // the bounds-restore — the dance sets its own explicit bounds afterward.
     if (suppressFullscreenNotification) return;
@@ -386,7 +392,7 @@ ipcMain.on('toggle-presenter-fullscreen', (event, desiredState) => {
   // isFullScreen() if the renderer didn't pass a desired state.
   const target = (typeof desiredState === 'boolean')
     ? desiredState
-    : !presenterWindow.isFullScreen();
+    : !presenterIsFullscreen;
 
   console.log('toggle-presenter-fullscreen: target =', target);
 
@@ -450,8 +456,9 @@ ipcMain.on('set-presenter-display', (event, id) => {
 
   // If presenter is already fullscreen, move it to the new monitor now without
   // requiring the user to toggle fullscreen off and on.
+  // Use our tracked flag — presenterWindow.isFullScreen() is flaky on Windows.
   if (!presenterWindow || presenterWindow.isDestroyed()) return;
-  if (!presenterWindow.isFullScreen()) return;
+  if (!presenterIsFullscreen) return;
   if (presenterTargetDisplayId == null) return;
   const target = screen.getAllDisplays().find(d => d.id === presenterTargetDisplayId);
   if (!target) return;
@@ -1251,13 +1258,16 @@ function startRemoteServer() {
   try {
     remoteServer = appExpress.listen(remoteServerPort, '0.0.0.0', () => {
       const localIP = getLocalIPAddress();
-      const url = `http://${localIP}:${remoteServerPort}`;
-      console.log(`Remote server started on ${url}`);
+      const localUrl = `http://${localIP}:${remoteServerPort}`;
+      console.log(`Remote server started on ${localUrl}`);
 
-      // Notify renderer
+      // Notify renderer immediately with the LAN URL; tunnel URL arrives later.
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('remote-server-started', { url });
+        mainWindow.webContents.send('remote-server-started', { localUrl, tunnelUrl: null });
       }
+
+      // Start a Cloudflare Tunnel so phones on other networks can reach the server.
+      startCloudflaredTunnel(remoteServerPort);
     });
 
     return { success: true };
@@ -1267,10 +1277,75 @@ function startRemoteServer() {
   }
 }
 
+// Spawn cloudflared as a "quick tunnel" — no account or auth required.
+// Reads the trycloudflare.com URL from stdout/stderr and forwards it to the
+// renderer via remote-server-tunnel-ready.
+function startCloudflaredTunnel(port) {
+  stopCloudflaredTunnel(); // belt-and-suspenders
+
+  const binPath = isDev
+    ? path.join(__dirname, 'vendor', 'cloudflared', 'cloudflared.exe')
+    : path.join(process.resourcesPath, 'cloudflared', 'cloudflared.exe');
+
+  if (!fs.existsSync(binPath)) {
+    console.warn(`[cloudflared] binary missing at ${binPath} — skipping tunnel`);
+    return;
+  }
+
+  try {
+    cloudflaredProcess = spawn(binPath, [
+      'tunnel',
+      '--url', `http://localhost:${port}`,
+      '--no-autoupdate'
+    ], { windowsHide: true });
+  } catch (err) {
+    console.error('[cloudflared] spawn failed:', err);
+    cloudflaredProcess = null;
+    return;
+  }
+
+  let tunnelReported = false;
+  const urlRe = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/i;
+  const handleChunk = (buf) => {
+    if (tunnelReported) return;
+    const text = buf.toString();
+    const m = text.match(urlRe);
+    if (m && mainWindow && !mainWindow.isDestroyed()) {
+      tunnelReported = true;
+      console.log(`[cloudflared] tunnel ready: ${m[0]}`);
+      mainWindow.webContents.send('remote-server-tunnel-ready', { tunnelUrl: m[0] });
+    }
+  };
+  cloudflaredProcess.stdout.on('data', handleChunk);
+  cloudflaredProcess.stderr.on('data', handleChunk); // cloudflared logs the URL via stderr
+  cloudflaredProcess.on('exit', (code) => {
+    console.log(`[cloudflared] exited with code ${code}`);
+    cloudflaredProcess = null;
+    if (!tunnelReported && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('remote-server-tunnel-ready', { tunnelUrl: null });
+    }
+  });
+  cloudflaredProcess.on('error', (err) => {
+    console.error('[cloudflared] process error:', err);
+  });
+}
+
+function stopCloudflaredTunnel() {
+  if (!cloudflaredProcess) return;
+  try {
+    cloudflaredProcess.kill();
+  } catch (err) {
+    console.error('[cloudflared] kill failed:', err);
+  }
+  cloudflaredProcess = null;
+}
+
 function stopRemoteServer() {
   if (!remoteServer) {
     return { success: false, error: 'Server not running' };
   }
+
+  stopCloudflaredTunnel();
 
   remoteServer.close(() => {
     console.log('Remote server stopped');
@@ -1314,6 +1389,63 @@ app.whenReady().then(() => {
   screen.on('display-added', notifyDisplaysChanged);
   screen.on('display-removed', notifyDisplaysChanged);
   screen.on('display-metrics-changed', notifyDisplaysChanged);
+
+  // Auto-update via GitHub Releases (publish provider configured in package.json).
+  // Skipped in dev. The repo must be public for anonymous reads; otherwise the
+  // 404 is logged but the rest of the app keeps working.
+  if (!isDev) {
+    setupAutoUpdater();
+  }
+});
+
+function setupAutoUpdater() {
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.logger = console;
+
+  const forward = (channel, payload) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(channel, payload);
+    }
+  };
+
+  autoUpdater.on('update-available', (info) => {
+    forward('update-available', { version: info.version, releaseNotes: info.releaseNotes });
+  });
+  autoUpdater.on('download-progress', (progress) => {
+    forward('update-download-progress', {
+      percent: progress.percent,
+      bytesPerSecond: progress.bytesPerSecond,
+      transferred: progress.transferred,
+      total: progress.total
+    });
+  });
+  autoUpdater.on('update-downloaded', (info) => {
+    forward('update-downloaded', { version: info.version });
+  });
+  autoUpdater.on('error', (err) => {
+    console.error('[autoUpdater] error:', err && err.message);
+  });
+
+  // Initial check 3 seconds after launch, then every 4 hours.
+  setTimeout(() => {
+    autoUpdater.checkForUpdates().catch(err => console.error('[autoUpdater] initial check failed:', err && err.message));
+  }, 3000);
+  setInterval(() => {
+    autoUpdater.checkForUpdates().catch(err => console.error('[autoUpdater] periodic check failed:', err && err.message));
+  }, 4 * 60 * 60 * 1000);
+}
+
+ipcMain.on('update-download', () => {
+  autoUpdater.downloadUpdate().catch(err => console.error('[autoUpdater] download failed:', err && err.message));
+});
+
+ipcMain.on('update-quit-and-install', () => {
+  autoUpdater.quitAndInstall();
+});
+
+app.on('before-quit', () => {
+  stopCloudflaredTunnel();
 });
 
 app.on('window-all-closed', () => {

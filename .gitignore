@@ -30,3 +30,6 @@ nul
 
 # OS
 Thumbs.db
+
+# vendored 3rd-party binaries — fetched by npm prebuild
+vendor/cloudflared/cloudflared.exe

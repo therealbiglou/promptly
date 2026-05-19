@@ -77,7 +77,12 @@ export default function App() {
   const [showRemote, setShowRemote] = useState(false);
   const [remoteServerActive, setRemoteServerActive] = useState(false);
   const [remoteServerUrl, setRemoteServerUrl] = useState('');
+  const [remoteTunnelUrl, setRemoteTunnelUrl] = useState(''); // Cloudflare cross-network URL
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
+  const [updateInfo, setUpdateInfo] = useState(null); // { version, releaseNotes } when an update is available
+  const [updateProgress, setUpdateProgress] = useState(null); // 0-100 while downloading
+  const [updateDownloaded, setUpdateDownloaded] = useState(false);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
   const [showFullscreen, setShowFullscreen] = useState(false);
   const [fullscreenMonitor, setFullscreenMonitor] = useState(0);
   const [presenterWindow, setPresenterWindow] = useState(null);
@@ -3401,7 +3406,17 @@ export default function App() {
     if (window.electron.onRemoteServerStarted) {
       const unsubscribe = window.electron.onRemoteServerStarted((data) => {
         setRemoteServerActive(true);
-        setRemoteServerUrl(data.url);
+        // Support legacy {url} payload as well as new {localUrl, tunnelUrl}
+        setRemoteServerUrl(data.localUrl || data.url || '');
+        setRemoteTunnelUrl(data.tunnelUrl || '');
+      });
+      unsubscribers.push(unsubscribe);
+    }
+
+    // Listen for the Cloudflare tunnel finishing setup (arrives after server-started)
+    if (window.electron.onRemoteTunnelReady) {
+      const unsubscribe = window.electron.onRemoteTunnelReady((data) => {
+        setRemoteTunnelUrl(data?.tunnelUrl || '');
       });
       unsubscribers.push(unsubscribe);
     }
@@ -3411,6 +3426,7 @@ export default function App() {
       const unsubscribe = window.electron.onRemoteServerStopped(() => {
         setRemoteServerActive(false);
         setRemoteServerUrl('');
+        setRemoteTunnelUrl('');
       });
       unsubscribers.push(unsubscribe);
     }
@@ -3469,10 +3485,12 @@ export default function App() {
     };
   }, []);
 
-  // Generate QR code when remote server URL changes
+  // Generate QR code — prefer the cross-network tunnel URL so phones on a different
+  // network can scan and reach the server. Fall back to the LAN URL.
   useEffect(() => {
-    if (remoteServerUrl) {
-      QRCode.toDataURL(remoteServerUrl, { width: 256, margin: 2 })
+    const preferred = remoteTunnelUrl || remoteServerUrl;
+    if (preferred) {
+      QRCode.toDataURL(preferred, { width: 256, margin: 2 })
         .then(url => {
           setQrCodeDataUrl(url);
         })
@@ -3482,7 +3500,34 @@ export default function App() {
     } else {
       setQrCodeDataUrl('');
     }
-  }, [remoteServerUrl]);
+  }, [remoteServerUrl, remoteTunnelUrl]);
+
+  // Auto-updater subscriptions
+  useEffect(() => {
+    if (!window.electron) return;
+    const subs = [];
+    if (window.electron.onUpdateAvailable) {
+      subs.push(window.electron.onUpdateAvailable((info) => {
+        setUpdateInfo(info);
+        setUpdateDownloaded(false);
+        setUpdateProgress(null);
+        setUpdateDismissed(false);
+      }));
+    }
+    if (window.electron.onUpdateProgress) {
+      subs.push(window.electron.onUpdateProgress((p) => {
+        setUpdateProgress(typeof p?.percent === 'number' ? p.percent : null);
+      }));
+    }
+    if (window.electron.onUpdateDownloaded) {
+      subs.push(window.electron.onUpdateDownloaded((info) => {
+        setUpdateDownloaded(true);
+        setUpdateProgress(100);
+        if (info?.version) setUpdateInfo(prev => prev || info);
+      }));
+    }
+    return () => subs.forEach(unsub => unsub && unsub());
+  }, []);
 
   // Expose settings to remote control interface
   useEffect(() => {
@@ -4950,7 +4995,7 @@ export default function App() {
                 {!remoteServerActive ? (
                   <div className="space-y-4">
                     <p className="text-sm text-gray-300">
-                      Connect your phone to control the teleprompter remotely. Make sure both devices are on the same WiFi network.
+                      Connect your phone to control the teleprompter remotely. Works on the same Wi‑Fi network OR across networks via the Cloudflare tunnel (a public URL is generated automatically).
                     </p>
                     <button
                       onClick={startRemoteServer}
@@ -4963,17 +5008,26 @@ export default function App() {
                   <div className="space-y-4">
                     <div className="p-4 bg-gray-800 rounded-lg">
                       <div className="text-sm text-green-400 mb-2">● Server Active</div>
-                      <div className="text-xs text-gray-400 mb-2">
-                        Scan the QR code below or visit:
+
+                      <div className="text-xs text-gray-400 mb-1">
+                        Internet (cross-network) {remoteTunnelUrl ? '' : '— starting…'}
                       </div>
+                      <div className="text-xs text-white font-mono bg-gray-900 p-2 rounded break-all mb-3">
+                        {remoteTunnelUrl || 'Waiting for Cloudflare tunnel…'}
+                      </div>
+
+                      <div className="text-xs text-gray-400 mb-1">Local network (same Wi‑Fi)</div>
                       <div className="text-xs text-white font-mono bg-gray-900 p-2 rounded break-all">
                         {remoteServerUrl}
                       </div>
                     </div>
 
                     {qrCodeDataUrl && (
-                      <div className="bg-white p-4 rounded-lg flex items-center justify-center">
+                      <div className="bg-white p-4 rounded-lg flex flex-col items-center justify-center">
                         <img src={qrCodeDataUrl} alt="QR Code" className="w-64 h-64" />
+                        <div className="text-xs text-gray-700 mt-2">
+                          {remoteTunnelUrl ? 'QR points to the internet URL' : 'QR points to local URL'}
+                        </div>
                       </div>
                     )}
 
@@ -5259,7 +5313,68 @@ export default function App() {
 
       {/* Fullscreen View */}
       {showFullscreen && <FullscreenView />}
-      
+
+      {/* Update available / downloading / ready-to-install toast (bottom-right) */}
+      {updateInfo && !updateDismissed && (
+        <div className="fixed bottom-4 right-4 z-50 bg-gray-800 border-2 border-purple-500 rounded-lg shadow-2xl p-4 max-w-sm">
+          <div className="flex items-start gap-3">
+            <Download size={20} className="text-purple-400 mt-0.5 flex-shrink-0" />
+            <div className="flex-1">
+              {updateDownloaded ? (
+                <>
+                  <div className="font-semibold mb-1">Promptly {updateInfo.version} ready</div>
+                  <div className="text-xs text-gray-400 mb-3">Restart to apply the update.</div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => window.electron?.quitAndInstallUpdate?.()}
+                      className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 rounded text-sm font-semibold"
+                    >
+                      Restart now
+                    </button>
+                    <button
+                      onClick={() => setUpdateDismissed(true)}
+                      className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-sm"
+                    >
+                      Later
+                    </button>
+                  </div>
+                </>
+              ) : updateProgress !== null ? (
+                <>
+                  <div className="font-semibold mb-1">Downloading Promptly {updateInfo.version}</div>
+                  <div className="h-1.5 bg-gray-700 rounded overflow-hidden mb-1">
+                    <div className="h-full bg-purple-500 transition-all" style={{ width: `${updateProgress}%` }} />
+                  </div>
+                  <div className="text-xs text-gray-400">{Math.round(updateProgress)}%</div>
+                </>
+              ) : (
+                <>
+                  <div className="font-semibold mb-1">Promptly {updateInfo.version} is available</div>
+                  <div className="text-xs text-gray-400 mb-3">An update was published on GitHub.</div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        window.electron?.downloadUpdate?.();
+                        setUpdateProgress(0);
+                      }}
+                      className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 rounded text-sm font-semibold"
+                    >
+                      Download
+                    </button>
+                    <button
+                      onClick={() => setUpdateDismissed(true)}
+                      className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-sm"
+                    >
+                      Skip
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Confirmation Dialog */}
       {confirmDialog && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center">

@@ -1,6 +1,6 @@
 {
   "name": "promptly",
-  "version": "1.0.178",
+  "version": "1.0.179",
   "description": "Promptly - Professional Teleprompter Application",
   "author": "Your Name",
   "main": "electron-main.js",
@@ -12,6 +12,7 @@
     "@testing-library/user-event": "^13.5.0",
     "cors": "^2.8.5",
     "electron-is-dev": "^2.0.0",
+    "electron-updater": "^6.8.3",
     "express": "^5.1.0",
     "jspdf": "^4.0.0",
     "lucide-react": "^0.263.1",
@@ -24,6 +25,7 @@
     "web-vitals": "^2.1.4"
   },
   "scripts": {
+    "prebuild": "node scripts/fetch-cloudflared.js",
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
@@ -84,6 +86,19 @@
       "electron-main.js",
       "electron-preload.js",
       "electron-presenter.html"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor/cloudflared",
+        "to": "cloudflared"
+      }
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "therealbiglou",
+        "repo": "promptly"
+      }
     ],
     "win": {
       "target": [
