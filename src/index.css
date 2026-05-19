@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Disable text selection in prompter content */
+.prompter-content {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+/* Remove ALL selection styling - completely transparent */
+.prompter-content ::selection,
+.prompter-content *::selection {
+  background: transparent !important;
+  color: inherit !important;
+  text-shadow: none !important;
+}
+
+.prompter-content ::-moz-selection,
+.prompter-content *::-moz-selection {
+  background: transparent !important;
+  color: inherit !important;
+  text-shadow: none !important;
+}
+
+/* Remove any background colors from all content */
+.prompter-content *,
+.prompter-content span,
+.prompter-content p,
+.prompter-content div,
+.prompter-content strong,
+.prompter-content em,
+.prompter-content u,
+.prompter-content font {
+  background-color: transparent !important;
+  background-image: none !important;
+  background: none !important;
+  text-decoration-color: inherit !important;
+}
+
+/* Force underline to use current text color */
+.prompter-content u {
+  text-decoration-color: currentColor !important;
+}

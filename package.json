@@ -1,0 +1,122 @@
+{
+  "name": "promptly",
+  "version": "1.0.175",
+  "description": "Promptly - Professional Teleprompter Application",
+  "author": "Your Name",
+  "main": "electron-main.js",
+  "homepage": "./",
+  "private": true,
+  "dependencies": {
+    "@testing-library/jest-dom": "^5.17.0",
+    "@testing-library/react": "^13.4.0",
+    "@testing-library/user-event": "^13.5.0",
+    "cors": "^2.8.5",
+    "electron-is-dev": "^2.0.0",
+    "express": "^5.1.0",
+    "jspdf": "^4.0.0",
+    "lucide-react": "^0.263.1",
+    "mammoth": "^1.11.0",
+    "pdf-parse": "^2.4.5",
+    "qrcode": "^1.5.4",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-scripts": "5.0.1",
+    "web-vitals": "^2.1.4"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject",
+    "electron": "electron .",
+    "electron-dev": "concurrently \"cross-env BROWSER=none npm start\" \"wait-on http://localhost:3000 && electron .\"",
+    "electron-build": "npm run build && electron-builder build",
+    "electron-build-win": "npm run build && electron-builder build --win",
+    "electron-build-mac": "npm run build && electron-builder build --mac",
+    "electron-build-linux": "npm run build && electron-builder build --linux"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.14",
+    "concurrently": "^8.2.0",
+    "cross-env": "^7.0.3",
+    "electron": "^27.0.0",
+    "electron-builder": "^24.6.4",
+    "postcss": "^8.4.24",
+    "tailwindcss": "^3.4.1",
+    "wait-on": "^7.0.1"
+  },
+  "build": {
+    "appId": "com.promptly.app",
+    "productName": "Promptly",
+    "extends": null,
+    "asar": true,
+    "extraMetadata": {
+      "main": "electron-main.js"
+    },
+    "asarUnpack": [
+      "electron-preload.js",
+      "electron-presenter.html"
+    ],
+    "directories": {
+      "buildResources": "public"
+    },
+    "files": [
+      "build/**/*",
+      "node_modules/**/*",
+      "electron-main.js",
+      "electron-preload.js",
+      "electron-presenter.html"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "public/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "perMachine": false,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "icon": "public/icon.icns",
+      "category": "public.app-category.productivity"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "icon": "public/icon.png",
+      "category": "Utility"
+    }
+  }
+}

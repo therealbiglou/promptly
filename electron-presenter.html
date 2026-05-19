@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html style="background: transparent !important;">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Promptly Presenter</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+      background: transparent !important;
+      background-color: transparent !important;
+    }
+    
+    /* All elements are no-drag by default */
+    * {
+      -webkit-app-region: no-drag;
+    }
+    
+    #presenter-root {
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+      background: transparent !important;
+    }
+    
+    #background-layer {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+      pointer-events: none;
+      background-color: transparent;
+    }
+    
+    #presenter-scroll {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      overflow-y: scroll;
+      z-index: 1;
+    }
+    
+    #presenter-scroll::-webkit-scrollbar {
+      display: none;
+    }
+    
+    #crosshair-container {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      z-index: 50;
+    }
+    
+    .crosshair-h {
+      position: absolute;
+      width: 32px;
+      height: 1px;
+      left: 50%;
+      top: 50%;
+      transform: translateX(-50%);
+    }
+    
+    .crosshair-v {
+      position: absolute;
+      height: 32px;
+      width: 1px;
+      left: 50%;
+      top: 50%;
+      transform: translateY(-50%);
+    }
+
+    #spotlight-circle {
+      position: fixed;
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      background: rgba(239, 68, 68, 0.5);
+      pointer-events: none;
+      z-index: 45;
+      transform: translate(-50%, -50%);
+      display: none;
+    }
+
+    #timer-overlay {
+      position: fixed;
+      top: 16px;
+      left: 16px;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 12px 16px;
+      border-radius: 8px;
+      border: 1px solid #4b5563;
+      z-index: 40;
+      color: white;
+    }
+    
+    .timer-flex {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 8px;
+    }
+    
+    .timer-section {
+      text-align: center;
+    }
+    
+    .timer-label {
+      font-size: 12px;
+      color: #9ca3af;
+      margin-bottom: 4px;
+    }
+    
+    .timer-elapsed {
+      font-size: 24px;
+      font-family: monospace;
+      font-weight: bold;
+      color: #60a5fa;
+    }
+    
+    .timer-total {
+      font-size: 18px;
+      font-family: monospace;
+      color: #d1d5db;
+    }
+    
+    .timer-divider {
+      color: #6b7280;
+    }
+    
+    .progress-bar {
+      position: relative;
+      height: 6px;
+      background: #374151;
+      border-radius: 9999px;
+      overflow: hidden;
+      width: 192px;
+    }
+    
+    .progress-fill {
+      height: 100%;
+      background: #3b82f6;
+      transition: width 0.3s;
+    }
+    
+    .speed-indicator {
+      font-size: 12px;
+      color: #9ca3af;
+      margin-top: 8px;
+      text-align: center;
+    }
+	
+	#drag-handle {
+	  position: fixed;
+	  top: 0;
+	  left: 0;
+	  right: 0;
+	  height: 40px;
+	  background: rgba(0, 0, 0, 0.5);
+	  z-index: 9998;
+	  display: flex;
+	  align-items: center;
+	  justify-content: space-between;
+	  padding: 0;
+	  color: white;
+	  font-size: 14px;
+	  backdrop-filter: blur(10px);
+	  transition: opacity 0.3s ease, transform 0.3s ease;
+	}
+
+	#drag-handle.fullscreen-hidden {
+	  opacity: 0;
+	  transform: translateY(-100%);
+	  pointer-events: none !important;
+	}
+
+	#drag-handle.fullscreen-visible {
+	  opacity: 1;
+	  transform: translateY(0);
+	  pointer-events: auto !important;
+	}
+
+	/* Ensure buttons always work when visible */
+	#drag-handle.fullscreen-visible button {
+	  pointer-events: auto !important;
+	}
+
+	.drag-area {
+	  flex: 1;
+	  height: 100%;
+	  display: flex;
+	  align-items: center;
+	  padding-left: 15px;
+	  cursor: move;
+	  user-select: none;
+	}
+
+	#drag-handle button {
+	  -webkit-app-region: no-drag;
+	  background: rgba(255, 255, 255, 0.1);
+	  color: white;
+	  border: 1px solid rgba(255, 255, 255, 0.2);
+	  padding: 5px 12px;
+	  border-radius: 4px;
+	  cursor: pointer;
+	  font-size: 13px;
+	  transition: background 0.2s;
+	  margin: 0 4px;
+	  pointer-events: auto !important;
+	  z-index: 10000;
+	  position: relative;
+	}
+
+	#drag-handle button:hover {
+	  background: rgba(255, 255, 255, 0.2);
+	}
+
+	#drag-handle .close-btn {
+	  background: rgba(220, 38, 38, 0.8);
+	  border-color: rgba(220, 38, 38, 0.9);
+	}
+
+	#drag-handle .close-btn:hover {
+	  background: rgba(220, 38, 38, 1);
+	}
+
+	#drag-handle .button-group {
+	  display: flex;
+	  gap: 0;
+	  align-items: center;
+	  padding-right: 10px;
+	  height: 100%;
+	  -webkit-app-region: no-drag;
+	  pointer-events: auto;
+	}
+
+	#fullscreen-hint {
+	  position: fixed;
+	  bottom: 20px;
+	  left: 50%;
+	  transform: translateX(-50%);
+	  background: rgba(0, 0, 0, 0.8);
+	  color: white;
+	  padding: 12px 24px;
+	  border-radius: 8px;
+	  font-size: 14px;
+	  z-index: 9999;
+	  opacity: 0;
+	  transition: opacity 0.3s ease;
+	  pointer-events: none;
+	  border: 1px solid rgba(255, 255, 255, 0.2);
+	  backdrop-filter: blur(10px);
+	}
+
+	#fullscreen-hint.visible {
+	  opacity: 1;
+	}
+  </style>
+</head>
+<body style="background: transparent !important; background-color: transparent !important;">
+  <div id="presenter-root">
+	<div id="drag-handle">
+		<div class="drag-area">
+		  <span>Presenter Window</span>
+		</div>
+		<div class="button-group">
+		  <button id="fullscreen-btn" title="Toggle Fullscreen (F11)">
+			⛶ Fullscreen
+		  </button>
+		  <button class="close-btn" title="Close Window" onclick="window.close(); return false;">
+			✕ Close
+		  </button>
+		</div>
+	  </div>
+  
+    <div id="background-layer"></div>
+    <div id="presenter-scroll"></div>
+    
+    <div id="crosshair-container">
+      <div>
+        <div class="crosshair-h" id="crosshair-h"></div>
+        <div class="crosshair-v" id="crosshair-v"></div>
+      </div>
+    </div>
+
+    <!-- Mouse spotlight circle -->
+    <div id="spotlight-circle"></div>
+
+    <div id="timer-overlay">
+      <div class="timer-flex">
+        <div class="timer-section">
+          <div class="timer-label">Elapsed</div>
+          <div class="timer-elapsed" id="elapsed-time">0:00</div>
+        </div>
+        <div class="timer-divider">/</div>
+        <div class="timer-section">
+          <div class="timer-label">Estimated</div>
+          <div class="timer-elapsed" id="estimated-time">0:00</div>
+        </div>
+      </div>
+
+      <div class="progress-bar">
+        <div class="progress-fill" id="progress-bar" style="width: 0%;"></div>
+      </div>
+
+      <div class="speed-indicator">
+        Speed: <span id="speed-display">2.0</span>x
+      </div>
+    </div>
+
+    <div id="fullscreen-hint">
+      Press F11 or move mouse to show controls
+    </div>
+
+  </div>
+  
+  <script>
+    // Format time helper
+    function formatTime(seconds) {
+      // Validate input
+      if (!isFinite(seconds) || seconds < 0) {
+        return '0:00';
+      }
+
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+
+      // Prevent display of unreasonably large numbers
+      if (mins > 9999) {
+        return '9999:59';
+      }
+
+      return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    // Toggle fullscreen
+    function toggleFullscreen() {
+      console.log('toggleFullscreen called');
+      console.log('window.electron:', window.electron);
+      if (window.electron && window.electron.togglePresenterFullscreen) {
+        console.log('Calling togglePresenterFullscreen');
+        window.electron.togglePresenterFullscreen();
+      } else {
+        console.error('window.electron.togglePresenterFullscreen not available');
+      }
+    }
+
+    // Fullscreen state and auto-hide variables
+    let isFullscreen = false;
+    let hideControlsTimeout = null;
+    let mouseMoveTimeout = null;
+    let hideHintTimeout = null;
+
+    // Dragging state
+    let isDragging = false;
+    let lastMouseX = 0;
+    let lastMouseY = 0;
+    let pendingDelta = null;
+    let dragAnimationFrame = null;
+
+    // Update fullscreen button text
+    function updateFullscreenButton(fullscreen) {
+      isFullscreen = fullscreen;
+      const btn = document.getElementById('fullscreen-btn');
+      const hint = document.getElementById('fullscreen-hint');
+
+      if (btn) {
+        btn.textContent = isFullscreen ? '⛶ Exit Fullscreen' : '⛶ Fullscreen';
+      }
+
+      // Set initial state
+      if (isFullscreen) {
+        showControlsTemporarily();
+
+        // Show hint for 5 seconds
+        if (hint) {
+          hint.classList.add('visible');
+          if (hideHintTimeout) clearTimeout(hideHintTimeout);
+          hideHintTimeout = setTimeout(() => {
+            hint.classList.remove('visible');
+          }, 5000);
+        }
+      } else {
+        showControlsPermanently();
+
+        // Hide hint immediately when exiting fullscreen
+        if (hint) {
+          hint.classList.remove('visible');
+          if (hideHintTimeout) {
+            clearTimeout(hideHintTimeout);
+            hideHintTimeout = null;
+          }
+        }
+      }
+    }
+
+    // Show controls temporarily (in fullscreen)
+    function showControlsTemporarily() {
+      const dragHandle = document.getElementById('drag-handle');
+      if (!dragHandle) return;
+
+      console.log('Showing controls');
+      dragHandle.classList.remove('fullscreen-hidden');
+      dragHandle.classList.add('fullscreen-visible');
+
+      // Clear existing timeout
+      if (hideControlsTimeout) {
+        clearTimeout(hideControlsTimeout);
+      }
+
+      // Hide after 3 seconds of no mouse movement
+      hideControlsTimeout = setTimeout(() => {
+        if (isFullscreen) {
+          console.log('Hiding controls');
+          dragHandle.classList.remove('fullscreen-visible');
+          dragHandle.classList.add('fullscreen-hidden');
+        }
+      }, 3000);
+    }
+
+    // Keep controls visible when hovering over them
+    function keepControlsVisible() {
+      if (hideControlsTimeout) {
+        clearTimeout(hideControlsTimeout);
+      }
+    }
+
+    // Handle window dragging
+    function startDrag(e) {
+      console.log('Starting drag, fullscreen:', isFullscreen);
+      e.preventDefault();
+
+      // If in fullscreen, exit first
+      if (isFullscreen) {
+        console.log('Exiting fullscreen to drag');
+        if (window.electron && window.electron.exitPresenterFullscreen) {
+          window.electron.exitPresenterFullscreen();
+        }
+        // Wait a bit for fullscreen to exit, then start drag
+        setTimeout(() => {
+          isDragging = true;
+          lastMouseX = e.screenX;
+          lastMouseY = e.screenY;
+          if (window.electron && window.electron.startPresenterDrag) {
+            window.electron.startPresenterDrag();
+          }
+        }, 100);
+        return;
+      }
+
+      isDragging = true;
+      lastMouseX = e.screenX;
+      lastMouseY = e.screenY;
+      if (window.electron && window.electron.startPresenterDrag) {
+        window.electron.startPresenterDrag();
+      }
+    }
+
+    let lastPositionUpdate = 0;
+    function updateWindowPosition() {
+      if (pendingDelta && window.electron && window.electron.movePresenterWindow) {
+        const now = Date.now();
+        // Only update every 50ms to prevent position accumulation issues
+        if (now - lastPositionUpdate >= 50) {
+          window.electron.movePresenterWindow(pendingDelta.deltaX, pendingDelta.deltaY);
+          pendingDelta = null;
+          lastPositionUpdate = now;
+        }
+      }
+      dragAnimationFrame = null;
+    }
+
+    function onDrag(e) {
+      if (!isDragging) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Calculate delta from last position
+      const deltaX = e.screenX - lastMouseX;
+      const deltaY = e.screenY - lastMouseY;
+
+      if (deltaX !== 0 || deltaY !== 0) {
+        lastMouseX = e.screenX;
+        lastMouseY = e.screenY;
+
+        // Store delta
+        if (pendingDelta) {
+          pendingDelta.deltaX += deltaX;
+          pendingDelta.deltaY += deltaY;
+        } else {
+          pendingDelta = { deltaX, deltaY };
+        }
+
+        // Schedule update if not already scheduled
+        if (!dragAnimationFrame) {
+          dragAnimationFrame = requestAnimationFrame(updateWindowPosition);
+        }
+      }
+    }
+
+    function stopDrag(e) {
+      if (isDragging) {
+        console.log('Stopping drag');
+        e.preventDefault();
+        e.stopPropagation();
+        isDragging = false;
+
+        // Cancel any pending animation frame
+        if (dragAnimationFrame) {
+          cancelAnimationFrame(dragAnimationFrame);
+          dragAnimationFrame = null;
+        }
+
+        // Apply final delta if pending
+        if (pendingDelta && window.electron && window.electron.movePresenterWindow) {
+          window.electron.movePresenterWindow(pendingDelta.deltaX, pendingDelta.deltaY);
+          pendingDelta = null;
+        }
+      }
+    }
+
+    // Show controls permanently (not in fullscreen)
+    function showControlsPermanently() {
+      const dragHandle = document.getElementById('drag-handle');
+      if (!dragHandle) return;
+
+      dragHandle.classList.remove('fullscreen-hidden', 'fullscreen-visible');
+
+      if (hideControlsTimeout) {
+        clearTimeout(hideControlsTimeout);
+        hideControlsTimeout = null;
+      }
+    }
+
+    // Listen for mouse movement to show controls in fullscreen
+    document.addEventListener('mousemove', () => {
+      if (isFullscreen) {
+        // Debounce mouse movement
+        if (mouseMoveTimeout) {
+          clearTimeout(mouseMoveTimeout);
+        }
+
+        mouseMoveTimeout = setTimeout(() => {
+          showControlsTemporarily();
+        }, 50); // Small delay to debounce
+      }
+    });
+
+    // Listen for keyboard events
+    document.addEventListener('keydown', (e) => {
+      // F11 - toggle fullscreen
+      if (e.key === 'F11') {
+        e.preventDefault();
+        toggleFullscreen();
+        return;
+      }
+
+      // Escape - exit fullscreen
+      if (e.key === 'Escape' && isFullscreen) {
+        e.preventDefault();
+        if (window.electron && window.electron.exitPresenterFullscreen) {
+          window.electron.exitPresenterFullscreen();
+        }
+        return;
+      }
+
+      // Show controls on any key press in fullscreen
+      if (isFullscreen) {
+        showControlsTemporarily();
+      }
+
+      // Prevent default behavior for spacebar and arrow keys to avoid jumping/scrolling
+      if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home') {
+        e.preventDefault();
+      }
+
+      // Forward keyboard events to main window for app control
+      if (window.electron && window.electron.sendPresenterKeyboardEvent) {
+        window.electron.sendPresenterKeyboardEvent({
+          key: e.key,
+          code: e.code,
+          ctrlKey: e.ctrlKey,
+          shiftKey: e.shiftKey,
+          altKey: e.altKey,
+          metaKey: e.metaKey
+        });
+      }
+    });
+    
+	// Wait for DOM to be ready
+	document.addEventListener('DOMContentLoaded', () => {
+	  // Set up button event listeners
+	  const fullscreenBtn = document.getElementById('fullscreen-btn');
+	  const closeBtn = document.querySelector('.close-btn');
+	  const dragHandle = document.getElementById('drag-handle');
+
+	  // Fullscreen button
+	  if (fullscreenBtn) {
+		const handleFullscreenClick = (e) => {
+		  e.preventDefault();
+		  e.stopPropagation();
+
+		  if (isFullscreen) {
+			if (window.electron && window.electron.exitPresenterFullscreen) {
+			  window.electron.exitPresenterFullscreen();
+			}
+		  } else {
+			if (window.electron && window.electron.togglePresenterFullscreen) {
+			  window.electron.togglePresenterFullscreen();
+			}
+		  }
+		};
+
+		fullscreenBtn.addEventListener('click', handleFullscreenClick);
+	  }
+
+	  // Keep controls visible when hovering over them
+	  if (dragHandle) {
+		dragHandle.addEventListener('mouseenter', () => {
+		  console.log('Mouse entered controls');
+		  if (isFullscreen) {
+			keepControlsVisible();
+			showControlsTemporarily(); // Reset the hide timer
+		  }
+		});
+
+		dragHandle.addEventListener('mouseleave', () => {
+		  console.log('Mouse left controls');
+		  if (isFullscreen) {
+			showControlsTemporarily(); // Start hide timer when leaving
+		  }
+		});
+	  }
+
+	  // Set up dragging on the drag area
+	  const dragArea = document.querySelector('.drag-area');
+	  if (dragArea) {
+		console.log('Setting up drag area');
+
+		const handleDragStart = (e) => {
+		  // Don't start drag if clicking on buttons
+		  if (e.target.closest('button')) {
+			console.log('Click on button detected, NOT starting drag');
+			return;
+		  }
+		  startDrag(e);
+		};
+
+		dragArea.addEventListener('mousedown', handleDragStart);
+
+		// Double-click to toggle fullscreen
+		dragArea.addEventListener('dblclick', (e) => {
+		  e.preventDefault();
+		  console.log('Double-click detected, toggling fullscreen');
+		  toggleFullscreen();
+		});
+	  }
+
+	  // Global mouse events for dragging
+	  document.addEventListener('mousemove', onDrag);
+	  document.addEventListener('mouseup', stopDrag);
+
+	  // Note: We no longer use drag offset, we use delta-based movement instead
+
+	  // Listen for content updates from main window via Electron IPC
+	  if (window.electron && window.electron.onPresenterContentUpdate) {
+		window.electron.onPresenterContentUpdate((data) => {
+		  updatePresenterContent(data);
+		});
+	  }
+
+	  if (window.electron && window.electron.onPresenterScrollUpdate) {
+		window.electron.onPresenterScrollUpdate((data) => {
+		  const scrollEl = document.getElementById('presenter-scroll');
+		  if (scrollEl) {
+			// Handle both old format (number) and new format (object with position)
+			if (typeof data === 'number') {
+			  // Direct pixel position
+			  scrollEl.scrollTop = data;
+			} else if (data && typeof data.position === 'number') {
+			  // Use absolute position for exact sync
+			  scrollEl.scrollTop = data.position;
+			}
+		  }
+		});
+	  }
+
+	  // Listen for spotlight position updates
+	  if (window.electron && window.electron.onPresenterSpotlightUpdate) {
+		window.electron.onPresenterSpotlightUpdate((position) => {
+		  const spotlight = document.getElementById('spotlight-circle');
+		  if (spotlight) {
+			if (position === null) {
+			  // Hide spotlight
+			  spotlight.style.display = 'none';
+			} else {
+			  // Show and position spotlight
+			  spotlight.style.display = 'block';
+			  spotlight.style.left = position.x + 'px';
+			  spotlight.style.top = position.y + 'px';
+			}
+		  }
+		});
+	  }
+
+	  // Listen for generic messages (like jump to chapter)
+	  if (window.electron && window.electron.onPresenterMessage) {
+		window.electron.onPresenterMessage((message) => {
+		  if (message.action === 'jumpToChapter') {
+			const scrollEl = document.getElementById('presenter-scroll');
+			if (scrollEl) {
+			  const chapterEl = scrollEl.querySelector(`#chapter-${message.chapterIndex}`);
+			  if (chapterEl) {
+				// Get computed padding to understand the offset
+				const computedStyle = window.getComputedStyle(scrollEl);
+				const paddingTop = parseFloat(computedStyle.paddingTop);
+
+				// Get the chapter's position and container's center point
+				const chapterTop = chapterEl.offsetTop;
+				const containerHeight = scrollEl.clientHeight;
+				const centerOffset = containerHeight / 2;
+
+				// Position so chapter START appears at vertical center (crosshair)
+				const targetScroll = chapterTop - centerOffset;
+				scrollEl.scrollTop = targetScroll;
+
+				console.log('[PRESENTER] Chapter', message.chapterIndex);
+				console.log('  - offsetTop:', chapterTop, 'px');
+				console.log('  - paddingTop:', paddingTop, 'px');
+				console.log('  - containerHeight:', containerHeight, 'px');
+				console.log('  - centerOffset:', centerOffset, 'px');
+				console.log('  - targetScroll:', targetScroll, 'px');
+				console.log('  - actualScroll:', scrollEl.scrollTop, 'px');
+				console.log('  - Expected: Chapter starts at', centerOffset, 'px from top of viewport');
+			  } else {
+				console.error('[PRESENTER] Could not find chapter element #chapter-' + message.chapterIndex);
+			  }
+			}
+		  }
+		});
+	  }
+
+	  // Listen for fullscreen state changes
+	  if (window.electron && window.electron.onPresenterFullscreenChange) {
+		window.electron.onPresenterFullscreenChange((fullscreen) => {
+		  updateFullscreenButton(fullscreen);
+		});
+	  }
+	});
+
+    function updatePresenterContent(data) {
+      // Update background color
+      const bgLayer = document.getElementById('background-layer');
+      if (data.bgColorRgba) {
+        bgLayer.style.backgroundColor = data.bgColorRgba;
+      } else if (data.bgColor) {
+        bgLayer.style.backgroundColor = data.bgColor;
+      } else {
+        // Ensure it stays transparent if no color is provided
+        bgLayer.style.backgroundColor = 'transparent';
+      }
+      
+      // Update crosshair color
+      const crosshairH = document.getElementById('crosshair-h');
+      const crosshairV = document.getElementById('crosshair-v');
+      if (crosshairH && crosshairV && data.crosshairColor) {
+        crosshairH.style.backgroundColor = data.crosshairColor;
+        crosshairV.style.backgroundColor = data.crosshairColor;
+      }
+      
+      // Render chapters
+      const scrollEl = document.getElementById('presenter-scroll');
+      const transform = `scaleX(${data.flipHorizontal ? -1 : 1}) scaleY(${data.flipVertical ? -1 : 1})`;
+      
+      let html = '';
+      
+      if (data.chapters && data.chapters.length > 0) {
+        data.chapters.forEach((chapter, index) => {
+          html += `<div id="chapter-${index}" style="margin-bottom: ${data.fontSize * data.lineHeight * data.chapterSpacing}px;">`;
+
+          if (chapter.showTitle) {
+            html += `
+              <div style="
+                font-size: ${data.fontSize * 1.5}px;
+                color: ${data.fontColor};
+                font-weight: bold;
+                line-height: ${data.lineHeight};
+                margin-bottom: ${data.fontSize * data.lineHeight}px;
+              ">${chapter.name}</div>
+            `;
+          }
+
+          html += `
+            <div style="
+              font-size: ${data.fontSize}px;
+              color: ${data.fontColor};
+              line-height: ${data.lineHeight};
+            ">${chapter.content}</div>
+          `;
+
+          html += '</div>';
+        });
+      }
+      
+      scrollEl.innerHTML = html;
+
+      // Calculate padding in pixels based on ACTUAL window dimensions (not passed data)
+      // Use actual window dimensions to avoid stale dimension data on first load
+      const actualWidth = window.innerWidth;
+      const actualHeight = window.innerHeight;
+      const halfHeight = actualHeight / 2;
+      const leadInPx = (data.leadInMargin / 100) * actualHeight;
+
+      // Top padding = half height (to reach center) + leadInMargin (to position below center)
+      // This makes ALL chapters start leadInMargin distance below the crosshair
+      const paddingTopPx = halfHeight + leadInPx;
+
+      // Bottom padding = more than half height so last line scrolls past the crosshair
+      const paddingBottomPx = halfHeight + (data.fontSize * data.lineHeight * 5); // Extra 5 lines of space
+
+      const paddingLeftPx = (data.horizontalMargin / 100) * actualWidth;
+      const paddingRightPx = (data.horizontalMargin / 100) * actualWidth;
+
+      console.log('[PRESENTER] Padding calculation:');
+      console.log('  - Window dimensions:', actualWidth, 'x', actualHeight);
+      console.log('  - Lead-in:', data.leadInMargin, '% =', leadInPx, 'px below crosshair');
+      console.log('  - Top padding:', paddingTopPx, 'px (halfHeight + leadIn)');
+      console.log('  - Bottom padding:', paddingBottomPx, 'px (halfHeight)');
+      console.log('  - Horizontal margin:', data.horizontalMargin, '% =', paddingLeftPx, 'px each side');
+
+      scrollEl.style.paddingLeft = `${paddingLeftPx}px`;
+      scrollEl.style.paddingRight = `${paddingRightPx}px`;
+      scrollEl.style.paddingTop = `${paddingTopPx}px`;
+      scrollEl.style.paddingBottom = `${paddingBottomPx}px`;
+      scrollEl.style.transform = transform;
+
+      // Show/hide timer overlay based on setting
+      const timerOverlay = document.getElementById('timer-overlay');
+      if (timerOverlay) {
+        timerOverlay.style.display = data.showTimerSpeed === false ? 'none' : 'block';
+      }
+
+      // Update progress display
+      updateProgressDisplay(data.scrollProgress, data.scrollSpeed, data.elapsedTime, data.estimatedDuration);
+    }
+
+    function formatTime(seconds) {
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    function updateProgressDisplay(progress, speed, elapsedTime, estimatedDuration) {
+      const elapsedTimeEl = document.getElementById('elapsed-time');
+      const estimatedTimeEl = document.getElementById('estimated-time');
+      const progressEl = document.getElementById('progress-bar');
+      const speedEl = document.getElementById('speed-display');
+
+      // Validate and sanitize inputs
+      const validProgress = (isFinite(progress) && progress >= 0 && progress <= 100) ? progress : 0;
+      const validSpeed = (isFinite(speed) && speed > 0) ? speed : 1.5;
+      const validElapsed = (isFinite(elapsedTime) && elapsedTime >= 0) ? elapsedTime : 0;
+      const validEstimated = (isFinite(estimatedDuration) && estimatedDuration >= 0) ? estimatedDuration : 0;
+
+      if (elapsedTimeEl) elapsedTimeEl.textContent = formatTime(validElapsed);
+      if (estimatedTimeEl) estimatedTimeEl.textContent = formatTime(validEstimated);
+      if (progressEl) progressEl.style.width = `${validProgress}%`;
+      if (speedEl) speedEl.textContent = validSpeed.toFixed(1);
+    }
+
+    // Send window dimensions to main window for 1:1 operator preview
+    function sendWindowDimensions() {
+      if (window.electron && window.electron.sendPresenterDimensions) {
+        const dimensions = {
+          width: window.innerWidth,
+          height: window.innerHeight
+        };
+        console.log('[PRESENTER] Sending dimensions:', dimensions);
+        window.electron.sendPresenterDimensions(dimensions);
+      }
+    }
+
+    // Send dimensions immediately, on load, and on resize
+    sendWindowDimensions(); // Send immediately
+    window.addEventListener('DOMContentLoaded', sendWindowDimensions);
+    window.addEventListener('resize', sendWindowDimensions);
+  </script>
+</body>
+</html>
