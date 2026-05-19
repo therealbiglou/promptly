@@ -184,10 +184,43 @@
     }
     
     .speed-indicator {
-      font-size: 12px;
-      color: #9ca3af;
       margin-top: 8px;
       text-align: center;
+      color: #d1d5db;
+    }
+    .speed-indicator .speed-label {
+      font-size: 12px;
+      color: #9ca3af;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+    .speed-indicator .speed-value {
+      font-size: 44px;
+      font-family: monospace;
+      font-weight: 800;
+      color: #fbbf24;
+      line-height: 1;
+      display: block;
+      margin-top: 4px;
+    }
+
+    #speed-popup {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: rgba(0, 0, 0, 0.78);
+      border: 1px solid #4b5563;
+      border-radius: 12px;
+      padding: 14px 22px;
+      color: #fbbf24;
+      font-family: monospace;
+      font-weight: 800;
+      font-size: 56px;
+      line-height: 1;
+      z-index: 55;
+      display: none;
+      pointer-events: none;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
     }
 	
 	#drag-handle {
@@ -347,9 +380,13 @@
       </div>
 
       <div class="speed-indicator">
-        Speed: <span id="speed-display">2.0</span>x
+        <div class="speed-label">Speed</div>
+        <span class="speed-value"><span id="speed-display">2.0</span>x</span>
       </div>
     </div>
+
+    <!-- Ephemeral speed-change popup, shown when the timer is hidden -->
+    <div id="speed-popup"></div>
 
     <div id="fullscreen-hint">
       Press F11 or move mouse to show controls
@@ -758,6 +795,20 @@
 		  } else {
 			overlay.textContent = String(value);
 			overlay.style.display = 'flex';
+		  }
+		});
+	  }
+
+	  // Ephemeral speed-change popup (shown when the timer is hidden)
+	  if (window.electron && window.electron.onPresenterSpeedPopup) {
+		window.electron.onPresenterSpeedPopup((value) => {
+		  const popup = document.getElementById('speed-popup');
+		  if (!popup) return;
+		  if (value === null || value === undefined) {
+			popup.style.display = 'none';
+		  } else {
+			popup.textContent = Number(value).toFixed(1) + 'x';
+			popup.style.display = 'block';
 		  }
 		});
 	  }

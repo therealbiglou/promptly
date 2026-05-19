@@ -374,6 +374,12 @@ ipcMain.on('update-presenter-countdown', (event, value) => {
   }
 });
 
+ipcMain.on('update-presenter-speed-popup', (event, value) => {
+  if (presenterWindow && !presenterWindow.isDestroyed()) {
+    presenterWindow.webContents.send('presenter-speed-popup', value);
+  }
+});
+
 ipcMain.on('presenter-message', (event, message) => {
   if (presenterWindow && !presenterWindow.isDestroyed()) {
     presenterWindow.webContents.send('presenter-message-received', message);
@@ -925,6 +931,38 @@ function startRemoteServer() {
           }
           .reset:active { background: #dc2626; }
 
+          .now-bar {
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            gap: 12px;
+            align-items: center;
+            background: #111827;
+            border: 1px solid #374151;
+            border-radius: 12px;
+            padding: 14px 16px;
+            margin-bottom: 4px;
+          }
+          .now-label {
+            font-size: 11px;
+            color: #9ca3af;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+          }
+          .now-chapter {
+            font-size: 16px;
+            font-weight: 600;
+            color: #e5e7eb;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+          .now-speed {
+            font-family: monospace;
+            font-size: 22px;
+            font-weight: 700;
+            color: #fbbf24;
+          }
+
           .toggle-row {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -995,8 +1033,14 @@ function startRemoteServer() {
         </div>
 
         <div class="controls" id="controls">
+          <div class="now-bar">
+            <div class="now-label">Now</div>
+            <div class="now-chapter" id="now-chapter">—</div>
+            <div class="now-speed" id="now-speed">—</div>
+          </div>
+
           <select class="chapter-select" id="chapter-select" onchange="jumpToChapter(this.value)">
-            <option value="">Select a chapter...</option>
+            <option value="">Jump to chapter…</option>
           </select>
 
           <button class="play-pause" onclick="sendCommand('play-pause')">
@@ -1108,21 +1152,51 @@ function startRemoteServer() {
           // Update chapter select dropdown
           function updateChapterSelect() {
             const select = document.getElementById('chapter-select');
-            select.innerHTML = '<option value="">Select a chapter...</option>';
+            select.innerHTML = '<option value="">Jump to chapter…</option>';
             chapters.forEach((chapter, index) => {
               const option = document.createElement('option');
               option.value = index;
               option.textContent = chapter.name;
               select.appendChild(option);
             });
+            // Re-apply current chapter highlight if known
+            applyCurrentChapter(latestState.currentChapterIndex);
           }
 
           // Jump to specific chapter
           function jumpToChapter(index) {
             if (index !== '') {
               sendCommand('jump-to-chapter', parseInt(index));
-              // Reset select
+              // Reset the placeholder; the /state poll will update the Now bar
               document.getElementById('chapter-select').value = '';
+            }
+          }
+
+          // ---- live state poll (speed, current chapter, isPlaying) ----
+          let latestState = { currentChapterIndex: -1, speed: 0, isPlaying: false };
+
+          function applyCurrentChapter(idx) {
+            const el = document.getElementById('now-chapter');
+            if (!el) return;
+            if (typeof idx !== 'number' || idx < 0 || !chapters[idx]) {
+              el.textContent = '—';
+              return;
+            }
+            el.textContent = (idx + 1) + '. ' + chapters[idx].name;
+          }
+
+          async function fetchState() {
+            try {
+              const response = await fetch('/state');
+              const state = await response.json();
+              latestState = Object.assign(latestState, state);
+              const speedEl = document.getElementById('now-speed');
+              if (speedEl && typeof state.speed === 'number') {
+                speedEl.textContent = state.speed.toFixed(1) + 'x';
+              }
+              applyCurrentChapter(state.currentChapterIndex);
+            } catch (error) {
+              console.error('Failed to fetch state:', error);
             }
           }
 
@@ -1151,9 +1225,11 @@ function startRemoteServer() {
           fetchSettings();
           fetchChapters();
           checkPresenterStatus();
+          fetchState();
           setInterval(fetchSettings, 5000); // Update every 5 seconds
           setInterval(fetchChapters, 10000); // Update every 10 seconds
           setInterval(checkPresenterStatus, 3000); // Update every 3 seconds
+          setInterval(fetchState, 1000); // Fast-changing state (speed, current chapter)
 
           // Keep screen awake using Wake Lock API
           let wakeLock = null;
@@ -1301,6 +1377,22 @@ function startRemoteServer() {
         .catch(error => {
           console.error('Error getting chapters:', error);
           res.status(500).json({ error: 'Failed to get chapters' });
+        });
+    } else {
+      res.status(500).json({ error: 'Main window not available' });
+    }
+  });
+
+  // Live state for the remote (polled frequently for speed + current chapter)
+  appExpress.get('/state', (req, res) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.executeJavaScript('window.getRemoteState ? window.getRemoteState() : {}')
+        .then(state => {
+          res.json(state);
+        })
+        .catch(error => {
+          console.error('Error getting state:', error);
+          res.status(500).json({ error: 'Failed to get state' });
         });
     } else {
       res.status(500).json({ error: 'Main window not available' });

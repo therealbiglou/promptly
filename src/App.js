@@ -3713,6 +3713,39 @@ export default function App() {
     };
   }, [presenterWindow]);
 
+  // Live state for the remote (polled at 1s) — current chapter, speed, playing flag.
+  useEffect(() => {
+    window.getRemoteState = () => {
+      return {
+        currentChapterIndex: currentChapterIndex,
+        speed: activeScrollSpeed,
+        isPlaying: isPlaying
+      };
+    };
+    return () => { delete window.getRemoteState; };
+  }, [currentChapterIndex, activeScrollSpeed, isPlaying]);
+
+  // Show an ephemeral speed-change popup on the presenter when the timer overlay is hidden.
+  const speedPopupTimeoutRef = useRef(null);
+  const lastPopupSpeedRef = useRef(activeScrollSpeed);
+  useEffect(() => {
+    if (activeScrollSpeed === lastPopupSpeedRef.current) return;
+    lastPopupSpeedRef.current = activeScrollSpeed;
+    if (showTimerSpeed) return; // timer overlay already shows the speed
+    if (!window.electron?.updatePresenterSpeedPopup) return;
+    window.electron.updatePresenterSpeedPopup(activeScrollSpeed);
+    if (speedPopupTimeoutRef.current) clearTimeout(speedPopupTimeoutRef.current);
+    speedPopupTimeoutRef.current = setTimeout(() => {
+      if (window.electron?.updatePresenterSpeedPopup) {
+        window.electron.updatePresenterSpeedPopup(null);
+      }
+      speedPopupTimeoutRef.current = null;
+    }, 1500);
+  }, [activeScrollSpeed, showTimerSpeed]);
+  useEffect(() => () => {
+    if (speedPopupTimeoutRef.current) clearTimeout(speedPopupTimeoutRef.current);
+  }, []);
+
   // Note: previewScrollRef is now updated directly in the animation loop (line 1048-1050)
   // for smooth scrolling without jitter
 
