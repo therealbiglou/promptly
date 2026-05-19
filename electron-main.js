@@ -368,6 +368,12 @@ ipcMain.on('update-presenter-spotlight', (event, position) => {
   }
 });
 
+ipcMain.on('update-presenter-countdown', (event, value) => {
+  if (presenterWindow && !presenterWindow.isDestroyed()) {
+    presenterWindow.webContents.send('presenter-countdown-update', value);
+  }
+});
+
 ipcMain.on('presenter-message', (event, message) => {
   if (presenterWindow && !presenterWindow.isDestroyed()) {
     presenterWindow.webContents.send('presenter-message-received', message);

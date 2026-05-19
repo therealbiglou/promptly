@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Play, Pause, Settings, FileText, Download, Upload, Edit2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronUp, ChevronDown, List, Plus, GripVertical, Trash2, Maximize2, Eye, EyeOff, Monitor, Bold, Italic, Underline, Palette, AlertCircle, Timer, Zap, Scissors, Clock, Type, Droplet, Move, BookOpen, Target, Check, X, FileDown, ArrowUpDown, Crosshair } from 'lucide-react';
+import { Play, Pause, Settings, FileText, Download, Upload, Edit2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronUp, ChevronDown, List, ListOrdered, Plus, GripVertical, Trash2, Maximize2, Eye, EyeOff, Monitor, Bold, Italic, Underline, Palette, AlertCircle, Timer, Zap, Scissors, Clock, Type, Droplet, Move, BookOpen, Target, Check, X, FileDown, ArrowUpDown, Crosshair } from 'lucide-react';
 import QRCode from 'qrcode';
 import { jsPDF } from 'jspdf';
 
@@ -141,7 +141,17 @@ export default function App() {
     '⏰', '⏱️', '⏲️', '🕐', '🕑', '🕒', '📅', '📆',
     // Objects
     '🎤', '🎧', '🔊', '📻', '💼', '📋', '📝', '✏️',
-    '📍', '🔖', '🏁', '🎯', '🎪', '🎭', '🎨', '🖼️'
+    '📍', '🔖', '🏁', '🎯', '🎪', '🎭', '🎨', '🖼️',
+    // Presenter cues — eyes & faces
+    '👀', '👁️', '😄', '😁', '😀', '😍', '😘', '😉',
+    '🙂', '🥰', '🤩', '🥺', '😱', '🤯', '🤐', '🤫',
+    '🤣', '😂',
+    // Hands & gestures
+    '✋', '🙌', '🙏', '🤲', '💪', '✊', '👊', '✌️',
+    // Status & cues
+    '🚀', '💯', '🎉', '🌟', '📌',
+    // Directional supplements
+    '↩️', '↪️', '🔼', '🔽'
   ];
   
   // Settings
@@ -151,6 +161,10 @@ export default function App() {
   const [lineHeight, setLineHeight] = useState(1.5);
   const [horizontalMargin, setHorizontalMargin] = useState(20);
   const [crosshairColor, setCrosshairColor] = useState('#ff0000');
+  const [crosshairLength, setCrosshairLength] = useState(32);
+  const [crosshairThickness, setCrosshairThickness] = useState(1);
+  const [countdownDuration, setCountdownDuration] = useState(0); // seconds; 0 = disabled
+  const [countdownValue, setCountdownValue] = useState(null); // current count, or null when not active
   const [showTimerSpeed, setShowTimerSpeed] = useState(true); // Show/hide timer and speed in presenter
   const [leadInMargin, setLeadInMargin] = useState(40);
   // leadOutMargin removed - bottom padding is always half height to allow last line to reach crosshair
@@ -196,6 +210,7 @@ export default function App() {
   const operatorPanelRef = useRef(null); // For measuring operator panel width
   const presenterRequiredToastTimeoutRef = useRef(null);
   const operatorSpotlightCircleRef = useRef(null);
+  const countdownIntervalRef = useRef(null);
   const presenterWindowScrollRef = useRef(null);
   const previewVideoRef = useRef(null); // For video stream of presenter window
   const previewStreamRef = useRef(null); // Store the MediaStream for cleanup
@@ -320,7 +335,9 @@ export default function App() {
     const formats = {
       bold: document.queryCommandState('bold'),
       italic: document.queryCommandState('italic'),
-      underline: document.queryCommandState('underline')
+      underline: document.queryCommandState('underline'),
+      unorderedList: document.queryCommandState('insertUnorderedList'),
+      orderedList: document.queryCommandState('insertOrderedList')
     };
     
     setActiveFormats(prev => ({
@@ -370,6 +387,12 @@ export default function App() {
         break;
       case 'emoji':
         document.execCommand('insertHTML', false, value);
+        break;
+      case 'unorderedList':
+        document.execCommand('insertUnorderedList', false, null);
+        break;
+      case 'orderedList':
+        document.execCommand('insertOrderedList', false, null);
         break;
     }
     
@@ -1982,13 +2005,16 @@ export default function App() {
       if (showColorPicker !== null || showEmojiPicker !== null || showSpeedPicker !== null) {
         const target = e.target;
         const isInsidePicker = target.closest('.color-picker-panel') || target.closest('.emoji-picker-panel') || target.closest('.speed-picker-panel');
-        const isPickerButton = target.closest('.picker-button');
-        
-        if (!isInsidePicker && !isPickerButton) {
+
+        // Any click outside an open panel closes all pickers. The trigger
+        // button's own onMouseDown handler runs after this and decides whether
+        // to (re-)open a picker. This ensures only one picker is open at a time
+        // and clicking the same button toggles it cleanly.
+        if (!isInsidePicker) {
           setShowColorPicker(null);
           setShowEmojiPicker(null);
           setShowSpeedPicker(null);
-          setTempChapterSpeed(null); // Clear temp speed when closing
+          setTempChapterSpeed(null);
         }
       }
     };
@@ -2455,6 +2481,9 @@ export default function App() {
         if (settings.lineHeight !== undefined) setLineHeight(settings.lineHeight);
         if (settings.horizontalMargin !== undefined) setHorizontalMargin(settings.horizontalMargin);
         if (settings.crosshairColor !== undefined) setCrosshairColor(settings.crosshairColor);
+        if (settings.crosshairLength !== undefined) setCrosshairLength(settings.crosshairLength);
+        if (settings.crosshairThickness !== undefined) setCrosshairThickness(settings.crosshairThickness);
+        if (settings.countdownDuration !== undefined) setCountdownDuration(settings.countdownDuration);
         if (settings.leadInMargin !== undefined) setLeadInMargin(settings.leadInMargin);
         if (settings.chapterSpacing !== undefined) setChapterSpacing(settings.chapterSpacing);
         if (settings.wordsPerMinute !== undefined) setWordsPerMinute(settings.wordsPerMinute);
@@ -2490,6 +2519,9 @@ export default function App() {
       lineHeight,
       horizontalMargin,
       crosshairColor,
+      crosshairLength,
+      crosshairThickness,
+      countdownDuration,
       leadInMargin,
       chapterSpacing,
       wordsPerMinute,
@@ -2507,6 +2539,9 @@ export default function App() {
     lineHeight,
     horizontalMargin,
     crosshairColor,
+    crosshairLength,
+    crosshairThickness,
+    countdownDuration,
     leadInMargin,
     chapterSpacing,
     wordsPerMinute,
@@ -2960,7 +2995,50 @@ export default function App() {
     }
   };
 
+  const cancelCountdown = () => {
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current);
+      countdownIntervalRef.current = null;
+    }
+    setCountdownValue(null);
+    if (window.electron?.updatePresenterCountdown) {
+      window.electron.updatePresenterCountdown(null);
+    }
+  };
+
+  const startCountdown = (onComplete) => {
+    cancelCountdown();
+    let remaining = countdownDuration;
+    setCountdownValue(remaining);
+    if (window.electron?.updatePresenterCountdown) {
+      window.electron.updatePresenterCountdown(remaining);
+    }
+    countdownIntervalRef.current = setInterval(() => {
+      remaining -= 1;
+      if (remaining > 0) {
+        setCountdownValue(remaining);
+        if (window.electron?.updatePresenterCountdown) {
+          window.electron.updatePresenterCountdown(remaining);
+        }
+      } else {
+        clearInterval(countdownIntervalRef.current);
+        countdownIntervalRef.current = null;
+        setCountdownValue(null);
+        if (window.electron?.updatePresenterCountdown) {
+          window.electron.updatePresenterCountdown(null);
+        }
+        onComplete();
+      }
+    }, 1000);
+  };
+
   const togglePlayPause = () => {
+    // Mid-countdown: clicking again aborts and stays paused.
+    if (countdownValue !== null) {
+      cancelCountdown();
+      return;
+    }
+
     if (hasReachedEnd) {
       // Reset everything to start from beginning
       scrollPositionRef.current = 0;
@@ -2976,10 +3054,21 @@ export default function App() {
     } else {
       if (!isPlaying) {
         lastSpeedChangeChapterRef.current = -1; // Reset when starting playback
+        if (countdownDuration > 0) {
+          startCountdown(() => setIsPlaying(true));
+          return;
+        }
       }
       setIsPlaying(prev => !prev);
     }
   };
+
+  // Cleanup countdown interval on unmount
+  useEffect(() => {
+    return () => {
+      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+    };
+  }, []);
 
   // Remote control functions
   const startRemoteServer = async () => {
@@ -3613,6 +3702,8 @@ export default function App() {
 			leadInMargin,
 			chapterSpacing,
 			crosshairColor,
+			crosshairLength,
+			crosshairThickness,
 			showTimerSpeed,
 			presenterWidth: presenterWindowDimensions.width,
 			presenterHeight: presenterWindowDimensions.height,
@@ -3721,7 +3812,8 @@ export default function App() {
 
     updatePresenterContent();
   }, [presenterWindow, currentScript, fontSize, fontColor, bgColor, lineHeight,
-      horizontalMargin, leadInMargin, chapterSpacing, crosshairColor, showTimerSpeed,
+      horizontalMargin, leadInMargin, chapterSpacing, crosshairColor, crosshairLength,
+      crosshairThickness, showTimerSpeed,
       scrollProgress, scrollSpeed, activeScrollSpeed, elapsedTime, estimatedDuration]);
 
   // Update timer in presenter window
@@ -3902,6 +3994,7 @@ export default function App() {
             </div>
           )}
           <div
+            className="prompter-content"
             style={{
               fontSize: `${fontSize * scale}px`,
               color: fontColor,
@@ -4059,15 +4152,32 @@ export default function App() {
             <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
               <div className="relative">
                 <div
-                  className="absolute w-8 h-px left-1/2 top-1/2 -translate-x-1/2"
-                  style={{ backgroundColor: crosshairColor }}
+                  className="absolute left-1/2 top-1/2 -translate-x-1/2"
+                  style={{ backgroundColor: crosshairColor, width: `${crosshairLength}px`, height: `${crosshairThickness}px` }}
                 ></div>
                 <div
-                  className="absolute h-8 w-px left-1/2 top-1/2 -translate-y-1/2"
-                  style={{ backgroundColor: crosshairColor }}
+                  className="absolute left-1/2 top-1/2 -translate-y-1/2"
+                  style={{ backgroundColor: crosshairColor, width: `${crosshairThickness}px`, height: `${crosshairLength}px` }}
                 ></div>
               </div>
             </div>
+            {/* Countdown overlay (operator preview) */}
+            {countdownValue !== null && (
+              <div className="absolute inset-0 z-30 pointer-events-none flex items-center justify-center">
+                <div
+                  style={{
+                    fontSize: `${presenterHeight * 0.25}px`,
+                    color: 'rgba(255,255,255,0.92)',
+                    textShadow: '0 0 20px rgba(0,0,0,0.6)',
+                    fontWeight: 700,
+                    lineHeight: 1,
+                    fontFamily: 'system-ui, -apple-system, sans-serif'
+                  }}
+                >
+                  {countdownValue}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -4080,17 +4190,17 @@ export default function App() {
         <PrompterContent
           scrollRefProp={scrollRef}
         />
-      
+
       {/* Center crosshair */}
       <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
         <div className="relative">
-          <div 
-            className="absolute w-8 h-px left-1/2 top-1/2 -translate-x-1/2"
-            style={{ backgroundColor: crosshairColor }}
+          <div
+            className="absolute left-1/2 top-1/2 -translate-x-1/2"
+            style={{ backgroundColor: crosshairColor, width: `${crosshairLength}px`, height: `${crosshairThickness}px` }}
           ></div>
-          <div 
-            className="absolute h-8 w-px left-1/2 top-1/2 -translate-y-1/2"
-            style={{ backgroundColor: crosshairColor }}
+          <div
+            className="absolute left-1/2 top-1/2 -translate-y-1/2"
+            style={{ backgroundColor: crosshairColor, width: `${crosshairThickness}px`, height: `${crosshairLength}px` }}
           ></div>
         </div>
       </div>
@@ -4131,6 +4241,12 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-gray-900 text-white">
+      {/* Restore default list styles inside ContentEditable + prompter output — Tailwind preflight strips them */}
+      <style>{`
+        [id^="chapter-content-"] ul, .prompter-content ul, .prompter-content-presenter ul { list-style: disc; padding-left: 1.5em; margin: 0.5em 0; }
+        [id^="chapter-content-"] ol, .prompter-content ol, .prompter-content-presenter ol { list-style: decimal; padding-left: 1.5em; margin: 0.5em 0; }
+        [id^="chapter-content-"] li, .prompter-content li, .prompter-content-presenter li { margin: 0.2em 0; }
+      `}</style>
       {/* Sidebar */}
       <div className="bg-gray-800 border-r border-gray-700 flex flex-col relative" style={{ width: `${sidebarWidth}px` }}>
         <div className="p-4 border-b border-gray-700">
@@ -4544,7 +4660,35 @@ export default function App() {
                     >
                       <Underline size={16} />
                     </button>
-                    
+
+                    <button
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        applyFormatting(chapter.id, 'unorderedList');
+                      }}
+                      className={`p-2 hover:bg-gray-600 rounded transition-colors ${
+                        activeFormats[chapter.id]?.unorderedList ? 'bg-blue-600 text-white' : ''
+                      }`}
+                      title="Bullet list"
+                      type="button"
+                    >
+                      <List size={16} />
+                    </button>
+
+                    <button
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        applyFormatting(chapter.id, 'orderedList');
+                      }}
+                      className={`p-2 hover:bg-gray-600 rounded transition-colors ${
+                        activeFormats[chapter.id]?.orderedList ? 'bg-blue-600 text-white' : ''
+                      }`}
+                      title="Numbered list"
+                      type="button"
+                    >
+                      <ListOrdered size={16} />
+                    </button>
+
                     <div className="w-px h-6 bg-gray-600"></div>
                     
                     <div className="relative">
@@ -4913,6 +5057,52 @@ export default function App() {
                     onChange={(e) => setCrosshairColor(e.target.value)}
                     className="w-full h-10 rounded cursor-pointer"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-sm mb-2">
+                    Crosshair Length: <span className="text-purple-400">{crosshairLength}px</span>
+                  </label>
+                  <input
+                    type="range"
+                    min="10"
+                    max="200"
+                    step="1"
+                    value={crosshairLength}
+                    onChange={(e) => setCrosshairLength(parseInt(e.target.value, 10))}
+                    className="w-full"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm mb-2">
+                    Crosshair Thickness: <span className="text-purple-400">{crosshairThickness}px</span>
+                  </label>
+                  <input
+                    type="range"
+                    min="1"
+                    max="10"
+                    step="1"
+                    value={crosshairThickness}
+                    onChange={(e) => setCrosshairThickness(parseInt(e.target.value, 10))}
+                    className="w-full"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm mb-2">
+                    Delayed start: <span className="text-purple-400">{countdownDuration === 0 ? 'Off' : `${countdownDuration}s`}</span>
+                  </label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="10"
+                    step="1"
+                    value={countdownDuration}
+                    onChange={(e) => setCountdownDuration(parseInt(e.target.value, 10))}
+                    className="w-full"
+                  />
+                  <div className="text-xs text-gray-400 mt-1">Counts down on operator + presenter before play. 0 disables.</div>
                 </div>
 
               </div>

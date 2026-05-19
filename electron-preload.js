@@ -33,6 +33,20 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.send('update-presenter-spotlight', position);
   },
 
+  // Send countdown value (number or null) to the presenter window
+  updatePresenterCountdown: (value) => {
+    ipcRenderer.send('update-presenter-countdown', value);
+  },
+
+  // For the presenter window: listen for countdown updates
+  onPresenterCountdownUpdate: (callback) => {
+    const subscription = (event, value) => callback(value);
+    ipcRenderer.on('presenter-countdown-update', subscription);
+    return () => {
+      ipcRenderer.removeListener('presenter-countdown-update', subscription);
+    };
+  },
+
   // Send generic message to presenter window
   sendPresenterMessage: (message) => {
     ipcRenderer.send('presenter-message', message);
