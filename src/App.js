@@ -214,6 +214,9 @@ export default function App() {
   const countdownPauseTimeoutRef = useRef(null);
   const countdownActiveRef = useRef(false); // refs are read live, immune to closure staleness in keyboard handler
   const lastCountdownDurationRef = useRef(3); // remembers the last non-zero countdown value for the toolbar toggle
+  const countdownDurationRef = useRef(0); // mirrors countdownDuration state so togglePlayPause sees latest value regardless of closure age
+  const isPlayingRef = useRef(false);
+  const hasReachedEndRef = useRef(false);
   const presenterWindowScrollRef = useRef(null);
   const previewVideoRef = useRef(null); // For video stream of presenter window
   const previewStreamRef = useRef(null); // Store the MediaStream for cleanup
@@ -2113,6 +2116,7 @@ export default function App() {
         jumpToNextChapter();
       } else if (matchesAnyShortcut(e, keyboardShortcuts.resetScript)) {
         e.preventDefault();
+        cancelCountdown();
         scrollPositionRef.current = 0;
         setScrollPosition(0);
         setIsPlaying(false);
@@ -2271,6 +2275,7 @@ export default function App() {
       } else if (matchesAnyShortcut(syntheticEvent, keyboardShortcuts.nextChapter)) {
         jumpToNextChapter();
       } else if (matchesAnyShortcut(syntheticEvent, keyboardShortcuts.resetScript)) {
+        cancelCountdown();
         scrollPositionRef.current = 0;
         setScrollPosition(0);
         setIsPlaying(false);
@@ -3026,7 +3031,7 @@ export default function App() {
   const startCountdown = (onComplete) => {
     cancelCountdown();
     countdownActiveRef.current = true;
-    let remaining = countdownDuration;
+    let remaining = countdownDurationRef.current;
     setCountdownValue(remaining);
     if (window.electron?.updatePresenterCountdown) {
       window.electron.updatePresenterCountdown(remaining);
@@ -3058,35 +3063,42 @@ export default function App() {
 
   const togglePlayPause = () => {
     // Mid-countdown or mid-pause: clicking again aborts and stays paused.
-    // Refs are immune to the keyboard handler's closure staleness.
+    // Reads refs only — no state closure values — so it's immune to stale closures
+    // from any caller (keyboard handler, button click, remote command, IPC forward).
     if (countdownActiveRef.current || countdownPauseTimeoutRef.current) {
       cancelCountdown();
+      setIsPlaying(false);
       return;
     }
 
-    if (hasReachedEnd) {
-      // Reset everything to start from beginning
+    if (hasReachedEndRef.current) {
       scrollPositionRef.current = 0;
       setScrollPosition(0);
       setHasReachedEnd(false);
-      // Reset timer completely
       pausedElapsedRef.current = 0;
       timerStartTimestampRef.current = null;
       setElapsedTime(0);
-      lastSpeedChangeChapterRef.current = -1; // Reset speed change tracking
-      // Start playing from the beginning
+      lastSpeedChangeChapterRef.current = -1;
+      setIsPlaying(true);
+      return;
+    }
+
+    if (!isPlayingRef.current) {
+      lastSpeedChangeChapterRef.current = -1;
+      if (countdownDurationRef.current > 0) {
+        startCountdown(() => setIsPlaying(true));
+        return;
+      }
       setIsPlaying(true);
     } else {
-      if (!isPlaying) {
-        lastSpeedChangeChapterRef.current = -1; // Reset when starting playback
-        if (countdownDuration > 0) {
-          startCountdown(() => setIsPlaying(true));
-          return;
-        }
-      }
-      setIsPlaying(prev => !prev);
+      setIsPlaying(false);
     }
   };
+
+  // Keep refs in sync with state so all togglePlayPause callers read the latest values.
+  useEffect(() => { countdownDurationRef.current = countdownDuration; }, [countdownDuration]);
+  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
+  useEffect(() => { hasReachedEndRef.current = hasReachedEnd; }, [hasReachedEnd]);
 
   // Cleanup countdown timers on unmount
   useEffect(() => {
@@ -3580,6 +3592,7 @@ export default function App() {
             }
             break;
           case 'reset':
+            cancelCountdown();
             scrollPositionRef.current = 0;
             setScrollPosition(0);
             setIsPlaying(false);
@@ -5412,6 +5425,7 @@ export default function App() {
 
             <button
               onClick={() => {
+                cancelCountdown();
                 scrollPositionRef.current = 0;
                 setScrollPosition(0);
                 setIsPlaying(false);
