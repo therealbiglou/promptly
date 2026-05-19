@@ -85,9 +85,25 @@ contextBridge.exposeInMainWorld('electron', {
     };
   },
 
-  // Toggle fullscreen mode for presenter window
-  togglePresenterFullscreen: () => {
-    ipcRenderer.send('toggle-presenter-fullscreen');
+  // Toggle fullscreen mode for presenter window. desiredState is optional;
+  // when provided, main process uses it directly instead of querying isFullScreen()
+  // (which is unreliable on Windows).
+  togglePresenterFullscreen: (desiredState) => {
+    ipcRenderer.send('toggle-presenter-fullscreen', desiredState);
+  },
+
+  // Multi-monitor support
+  getDisplays: () => ipcRenderer.invoke('get-displays'),
+  getPresenterDisplay: () => ipcRenderer.invoke('get-presenter-display'),
+  setPresenterDisplay: (id) => {
+    ipcRenderer.send('set-presenter-display', id);
+  },
+  onDisplaysChanged: (callback) => {
+    const subscription = () => callback();
+    ipcRenderer.on('displays-changed', subscription);
+    return () => {
+      ipcRenderer.removeListener('displays-changed', subscription);
+    };
   },
 
   // Exit fullscreen mode for presenter window

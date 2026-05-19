@@ -83,6 +83,9 @@ export default function App() {
   const [presenterWindow, setPresenterWindow] = useState(null);
   const [presenterWindowDimensions, setPresenterWindowDimensions] = useState({ width: 1920, height: 1080 }); // Track actual presenter window size for 1:1 operator preview
   const [presenterFullscreen, setPresenterFullscreen] = useState(false); // Track if presenter window is in fullscreen mode
+  const [displays, setDisplays] = useState([]);
+  const [presenterDisplayId, setPresenterDisplayId] = useState(null); // null = "auto / current monitor"
+  const [showDisplayDropdown, setShowDisplayDropdown] = useState(false);
   const [operatorPanelWidth, setOperatorPanelWidth] = useState(800); // Track operator panel width for responsive scaling
   const [editingScriptId, setEditingScriptId] = useState(null);
   const [showChapterList, setShowChapterList] = useState(false);
@@ -1928,6 +1931,45 @@ export default function App() {
       }
     });
   }, [scrollPosition, presenterWindow]);
+
+  // Load display list and chosen target id from main process; refresh on display changes.
+  useEffect(() => {
+    if (!window.electron?.getDisplays) return;
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const [list, current] = await Promise.all([
+          window.electron.getDisplays(),
+          window.electron.getPresenterDisplay()
+        ]);
+        if (cancelled) return;
+        setDisplays(list || []);
+        setPresenterDisplayId(typeof current === 'number' ? current : null);
+      } catch (err) {
+        console.error('Failed to load displays:', err);
+      }
+    };
+    refresh();
+    const unsub = window.electron.onDisplaysChanged
+      ? window.electron.onDisplaysChanged(refresh)
+      : null;
+    return () => {
+      cancelled = true;
+      if (unsub) unsub();
+    };
+  }, []);
+
+  // Close the display picker on outside click.
+  useEffect(() => {
+    if (!showDisplayDropdown) return;
+    const handle = (e) => {
+      if (!e.target.closest('.display-picker')) {
+        setShowDisplayDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, [showDisplayDropdown]);
 
   // Close pickers when clicking outside
   useEffect(() => {
@@ -3910,13 +3952,8 @@ export default function App() {
           handleManualScroll(e.deltaY);
         } : undefined}
       >
-        {/* Stacked mode indicators + toast */}
+        {/* Stacked active-mode indicators (presenter is open when these can be true) */}
         <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1">
-          {presenterRequiredToast && (
-            <div className="bg-amber-500 text-black px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1">
-              <AlertCircle size={14} /> Open the presenter window to use this mode
-            </div>
-          )}
           {manualScrollMode && (
             <div className="bg-yellow-500 text-black px-3 py-1 rounded-full text-xs font-bold">
               SCROLL MODE (J to exit)
@@ -5105,11 +5142,65 @@ export default function App() {
               <Monitor size={16} />
               {presenterWindow && !presenterWindow.closed ? 'Window Open ✓' : 'Open Presenter Window'}
             </button>
+            {presenterWindow && !presenterWindow.closed && displays.length > 1 && (() => {
+              const selected = displays.find(d => d.id === presenterDisplayId);
+              const formatLabel = (d, i) => {
+                const w = d.size?.width ?? d.bounds?.width;
+                const h = d.size?.height ?? d.bounds?.height;
+                const prefix = d.label ? `${d.label} — ` : '';
+                const suffix = d.primary ? ' — Primary' : '';
+                return `${prefix}Monitor ${i + 1} (${w}×${h})${suffix}`;
+              };
+              const triggerText = selected
+                ? `Monitor ${displays.findIndex(d => d.id === selected.id) + 1}`
+                : 'Auto';
+              return (
+                <div className="relative display-picker">
+                  <button
+                    onClick={() => setShowDisplayDropdown(v => !v)}
+                    className="px-3 py-2 rounded flex items-center gap-1 bg-gray-700 hover:bg-gray-600 text-sm"
+                    title="Choose which monitor the presenter fullscreens to"
+                  >
+                    <Monitor size={14} />
+                    {triggerText}
+                    <ChevronDown size={14} />
+                  </button>
+                  {showDisplayDropdown && (
+                    <div className="absolute top-full right-0 mt-2 bg-gray-700 rounded-lg shadow-lg border border-gray-600 z-50" style={{ minWidth: '240px' }}>
+                      <button
+                        onClick={() => {
+                          window.electron?.setPresenterDisplay?.(null);
+                          setPresenterDisplayId(null);
+                          setShowDisplayDropdown(false);
+                        }}
+                        className={`w-full px-3 py-2 hover:bg-gray-600 text-left border-b border-gray-600 text-sm ${presenterDisplayId === null ? 'bg-purple-600/40 font-semibold' : ''}`}
+                      >
+                        Auto (current monitor)
+                      </button>
+                      {displays.map((d, i) => (
+                        <button
+                          key={d.id}
+                          onClick={() => {
+                            window.electron?.setPresenterDisplay?.(d.id);
+                            setPresenterDisplayId(d.id);
+                            setShowDisplayDropdown(false);
+                          }}
+                          className={`w-full px-3 py-2 hover:bg-gray-600 text-left border-b border-gray-600 last:border-b-0 text-sm ${presenterDisplayId === d.id ? 'bg-purple-600/40 font-semibold' : ''}`}
+                        >
+                          {formatLabel(d, i)}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             {presenterWindow && !presenterWindow.closed && (
               <button
                 onClick={() => {
                   if (window.electron?.togglePresenterFullscreen) {
-                    window.electron.togglePresenterFullscreen();
+                    window.electron.togglePresenterFullscreen(!presenterFullscreen);
                   }
                 }}
                 className={`px-4 py-2 rounded flex items-center gap-2 ${
@@ -5125,6 +5216,11 @@ export default function App() {
             )}
           </div>
           <div className="flex-1 relative overflow-hidden bg-gray-700">
+            {presenterRequiredToast && (
+              <div className="absolute top-2 left-1/2 -translate-x-1/2 z-30 bg-amber-500 text-black px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 pointer-events-none">
+                <AlertCircle size={14} /> Open the presenter window to use this mode
+              </div>
+            )}
             <div key="preview-content" className="h-full relative z-10">
               {renderOperatorPreview()}
             </div>

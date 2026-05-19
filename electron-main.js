@@ -17,6 +17,7 @@ let mainWindow;
 let presenterWindow;
 let presenterWindowBounds = { width: 1920, height: 1080, x: 100, y: 100 }; // Default bounds
 let presenterBeforeFullscreenBounds = null; // Store bounds before fullscreen
+let presenterTargetDisplayId = null; // Display id to move presenter to before going fullscreen (null = current)
 
 // Remote control server
 let remoteServer = null;
@@ -36,6 +37,10 @@ function loadWindowBounds() {
         presenterWindowBounds = state.presenterWindow;
         console.log('Loaded presenter window bounds:', presenterWindowBounds);
       }
+      if (typeof state.presenterTargetDisplayId === 'number') {
+        presenterTargetDisplayId = state.presenterTargetDisplayId;
+        console.log('Loaded presenter target display id:', presenterTargetDisplayId);
+      }
     }
   } catch (error) {
     console.error('Failed to load window state:', error);
@@ -46,13 +51,27 @@ function loadWindowBounds() {
 function saveWindowBounds() {
   try {
     const state = {
-      presenterWindow: presenterWindowBounds
+      presenterWindow: presenterWindowBounds,
+      presenterTargetDisplayId: presenterTargetDisplayId
     };
     fs.writeFileSync(windowStateFile, JSON.stringify(state, null, 2), 'utf8');
     console.log('Saved window state');
   } catch (error) {
     console.error('Failed to save window state:', error);
   }
+}
+
+// Move presenter window to the chosen target display's work area before fullscreen.
+// Falls back silently if no target is set or the display is no longer connected.
+function moveToTargetDisplayIfNeeded() {
+  if (presenterTargetDisplayId == null) return;
+  if (!presenterWindow || presenterWindow.isDestroyed()) return;
+  const target = screen.getAllDisplays().find(d => d.id === presenterTargetDisplayId);
+  if (!target) {
+    console.log('Target display not connected, falling back to current monitor');
+    return;
+  }
+  presenterWindow.setBounds(target.workArea);
 }
 
 function createMainWindow() {
@@ -279,13 +298,14 @@ function createPresenterWindow() {
   presenterWindow.on('resize', saveBounds);
   presenterWindow.on('move', saveBounds);
 
-  // Listen for fullscreen changes (e.g., from F11 or system shortcuts)
+  // Listen for fullscreen changes (e.g., from F11 or system shortcuts).
+  // Do NOT capture bounds here — this event fires after fullscreen is applied,
+  // so getBounds() returns fullscreen bounds. Bounds are captured by the toggle
+  // IPC handler before setFullScreen(true), and continuously by the resize/move
+  // debounce while not fullscreen.
   presenterWindow.on('enter-full-screen', () => {
     if (presenterWindow && !presenterWindow.isDestroyed()) {
-      // Save current bounds before entering fullscreen
-      presenterBeforeFullscreenBounds = presenterWindow.getBounds();
       presenterWindow.webContents.send('presenter-fullscreen-changed', true);
-      // Also notify the main window so it can update its UI
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('presenter-fullscreen-changed', true);
       }
@@ -295,15 +315,16 @@ function createPresenterWindow() {
   presenterWindow.on('leave-full-screen', () => {
     if (presenterWindow && !presenterWindow.isDestroyed()) {
       presenterWindow.webContents.send('presenter-fullscreen-changed', false);
-      // Also notify the main window so it can update its UI
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('presenter-fullscreen-changed', false);
       }
-      // Restore bounds from before fullscreen
-      if (presenterBeforeFullscreenBounds) {
-        presenterWindow.setBounds(presenterBeforeFullscreenBounds);
-        presenterBeforeFullscreenBounds = null;
+      // Restore bounds: prefer the snapshot taken at toggle time;
+      // fall back to last-known non-fullscreen bounds (covers F11 / system shortcut).
+      const restoreTo = presenterBeforeFullscreenBounds || presenterWindowBounds;
+      if (restoreTo) {
+        presenterWindow.setBounds(restoreTo);
       }
+      presenterBeforeFullscreenBounds = null;
     }
   });
 }
@@ -350,35 +371,28 @@ ipcMain.on('presenter-dimensions-update', (event, dimensions) => {
   }
 });
 
-ipcMain.on('toggle-presenter-fullscreen', () => {
-  console.log('========================================');
-  console.log('toggle-presenter-fullscreen IPC received!');
-
-  if (presenterWindow && !presenterWindow.isDestroyed()) {
-    const isCurrentlyFullscreen = presenterWindow.isFullScreen();
-    console.log('Current fullscreen state:', isCurrentlyFullscreen);
-    console.log('Toggling to:', !isCurrentlyFullscreen);
-
-    if (!isCurrentlyFullscreen) {
-      // Entering fullscreen - save current bounds
-      presenterBeforeFullscreenBounds = presenterWindow.getBounds();
-      console.log('Saved bounds before fullscreen:', presenterBeforeFullscreenBounds);
-    }
-
-    presenterWindow.setFullScreen(!isCurrentlyFullscreen);
-    console.log('setFullScreen called with:', !isCurrentlyFullscreen);
-
-    // Notify the presenter window about the fullscreen state change
-    presenterWindow.webContents.send('presenter-fullscreen-changed', !isCurrentlyFullscreen);
-    // Also notify the main window so it can update its UI
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('presenter-fullscreen-changed', !isCurrentlyFullscreen);
-    }
-    console.log('Sent presenter-fullscreen-changed event with:', !isCurrentlyFullscreen);
-  } else {
-    console.error('presenterWindow is null or destroyed!');
+ipcMain.on('toggle-presenter-fullscreen', (event, desiredState) => {
+  if (!presenterWindow || presenterWindow.isDestroyed()) {
+    console.error('toggle-presenter-fullscreen: presenterWindow is null or destroyed');
+    return;
   }
-  console.log('========================================');
+
+  // Renderer is the source of truth (it tracks fullscreen state via
+  // presenter-fullscreen-changed events). Only fall back to querying
+  // isFullScreen() if the renderer didn't pass a desired state.
+  const target = (typeof desiredState === 'boolean')
+    ? desiredState
+    : !presenterWindow.isFullScreen();
+
+  console.log('toggle-presenter-fullscreen: target =', target);
+
+  if (target) {
+    presenterBeforeFullscreenBounds = presenterWindow.getBounds();
+    moveToTargetDisplayIfNeeded();
+  }
+  presenterWindow.setFullScreen(target);
+  // The enter-full-screen / leave-full-screen handlers send the
+  // presenter-fullscreen-changed notification.
 });
 
 ipcMain.on('exit-presenter-fullscreen', () => {
@@ -408,6 +422,27 @@ ipcMain.on('exit-presenter-fullscreen', () => {
     console.error('presenterWindow is null or destroyed!');
   }
   console.log('========================================');
+});
+
+// Multi-monitor / display selection
+ipcMain.handle('get-displays', () => {
+  const primaryId = screen.getPrimaryDisplay().id;
+  return screen.getAllDisplays().map(d => ({
+    id: d.id,
+    label: d.label || '',
+    bounds: d.bounds,
+    workArea: d.workArea,
+    size: d.size,
+    scaleFactor: d.scaleFactor,
+    primary: d.id === primaryId
+  }));
+});
+
+ipcMain.handle('get-presenter-display', () => presenterTargetDisplayId);
+
+ipcMain.on('set-presenter-display', (event, id) => {
+  presenterTargetDisplayId = (typeof id === 'number') ? id : null;
+  saveWindowBounds();
 });
 
 // Handle window dragging
@@ -1224,6 +1259,17 @@ app.commandLine.appendSwitch('disable-gpu-compositing', false);
 app.whenReady().then(() => {
   loadWindowBounds(); // Load saved window positions
   createMainWindow();
+
+  // Notify the renderer whenever the display configuration changes so the
+  // monitor-picker dropdown can refresh.
+  const notifyDisplaysChanged = () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('displays-changed');
+    }
+  };
+  screen.on('display-added', notifyDisplaysChanged);
+  screen.on('display-removed', notifyDisplaysChanged);
+  screen.on('display-metrics-changed', notifyDisplaysChanged);
 });
 
 app.on('window-all-closed', () => {
