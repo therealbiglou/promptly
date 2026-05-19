@@ -211,6 +211,7 @@ export default function App() {
   const presenterRequiredToastTimeoutRef = useRef(null);
   const operatorSpotlightCircleRef = useRef(null);
   const countdownIntervalRef = useRef(null);
+  const countdownPauseTimeoutRef = useRef(null);
   const presenterWindowScrollRef = useRef(null);
   const previewVideoRef = useRef(null); // For video stream of presenter window
   const previewStreamRef = useRef(null); // Store the MediaStream for cleanup
@@ -1999,28 +2000,37 @@ export default function App() {
     return () => document.removeEventListener('mousedown', handle);
   }, [showDisplayDropdown]);
 
-  // Close pickers when clicking outside
+  // Close pickers when clicking outside.
+  //
+  // Two subtleties this handler addresses:
+  //  1. The contentEditable editor calls e.stopPropagation() on mousedown, which
+  //     blocks the bubble phase from reaching document. We use the CAPTURE phase
+  //     instead so editor clicks still close any open picker.
+  //  2. We must NOT close on clicks of the picker trigger button or inside the
+  //     panel itself — the trigger's own onMouseDown handles toggle, and inside
+  //     clicks (e.g. color swatches) need to work.
   useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (showColorPicker !== null || showEmojiPicker !== null || showSpeedPicker !== null) {
-        const target = e.target;
-        const isInsidePicker = target.closest('.color-picker-panel') || target.closest('.emoji-picker-panel') || target.closest('.speed-picker-panel');
+    const anyOpen = showColorPicker !== null || showEmojiPicker !== null || showSpeedPicker !== null;
+    if (!anyOpen) return;
 
-        // Any click outside an open panel closes all pickers. The trigger
-        // button's own onMouseDown handler runs after this and decides whether
-        // to (re-)open a picker. This ensures only one picker is open at a time
-        // and clicking the same button toggles it cleanly.
-        if (!isInsidePicker) {
-          setShowColorPicker(null);
-          setShowEmojiPicker(null);
-          setShowSpeedPicker(null);
-          setTempChapterSpeed(null);
-        }
+    const handle = (e) => {
+      const target = e.target;
+      if (
+        target.closest('.color-picker-panel') ||
+        target.closest('.emoji-picker-panel') ||
+        target.closest('.speed-picker-panel') ||
+        target.closest('.picker-button')
+      ) {
+        return;
       }
+      setShowColorPicker(null);
+      setShowEmojiPicker(null);
+      setShowSpeedPicker(null);
+      setTempChapterSpeed(null);
     };
 
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('mousedown', handle, true);
+    return () => document.removeEventListener('mousedown', handle, true);
   }, [showColorPicker, showEmojiPicker, showSpeedPicker]);
 
   const showPresenterRequiredToast = () => {
@@ -3000,6 +3010,10 @@ export default function App() {
       clearInterval(countdownIntervalRef.current);
       countdownIntervalRef.current = null;
     }
+    if (countdownPauseTimeoutRef.current) {
+      clearTimeout(countdownPauseTimeoutRef.current);
+      countdownPauseTimeoutRef.current = null;
+    }
     setCountdownValue(null);
     if (window.electron?.updatePresenterCountdown) {
       window.electron.updatePresenterCountdown(null);
@@ -3021,20 +3035,25 @@ export default function App() {
           window.electron.updatePresenterCountdown(remaining);
         }
       } else {
+        // Countdown numbers are done — hide overlay, then wait one full second
+        // before starting playback so there's breathing room for the presenter.
         clearInterval(countdownIntervalRef.current);
         countdownIntervalRef.current = null;
         setCountdownValue(null);
         if (window.electron?.updatePresenterCountdown) {
           window.electron.updatePresenterCountdown(null);
         }
-        onComplete();
+        countdownPauseTimeoutRef.current = setTimeout(() => {
+          countdownPauseTimeoutRef.current = null;
+          onComplete();
+        }, 1000);
       }
     }, 1000);
   };
 
   const togglePlayPause = () => {
-    // Mid-countdown: clicking again aborts and stays paused.
-    if (countdownValue !== null) {
+    // Mid-countdown or mid-pause: clicking again aborts and stays paused.
+    if (countdownValue !== null || countdownPauseTimeoutRef.current) {
       cancelCountdown();
       return;
     }
@@ -3063,10 +3082,11 @@ export default function App() {
     }
   };
 
-  // Cleanup countdown interval on unmount
+  // Cleanup countdown timers on unmount
   useEffect(() => {
     return () => {
       if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+      if (countdownPauseTimeoutRef.current) clearTimeout(countdownPauseTimeoutRef.current);
     };
   }, []);
 
@@ -4152,11 +4172,11 @@ export default function App() {
             <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
               <div className="relative">
                 <div
-                  className="absolute left-1/2 top-1/2 -translate-x-1/2"
+                  className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
                   style={{ backgroundColor: crosshairColor, width: `${crosshairLength}px`, height: `${crosshairThickness}px` }}
                 ></div>
                 <div
-                  className="absolute left-1/2 top-1/2 -translate-y-1/2"
+                  className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
                   style={{ backgroundColor: crosshairColor, width: `${crosshairThickness}px`, height: `${crosshairLength}px` }}
                 ></div>
               </div>
@@ -4195,11 +4215,11 @@ export default function App() {
       <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
         <div className="relative">
           <div
-            className="absolute left-1/2 top-1/2 -translate-x-1/2"
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
             style={{ backgroundColor: crosshairColor, width: `${crosshairLength}px`, height: `${crosshairThickness}px` }}
           ></div>
           <div
-            className="absolute left-1/2 top-1/2 -translate-y-1/2"
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
             style={{ backgroundColor: crosshairColor, width: `${crosshairThickness}px`, height: `${crosshairLength}px` }}
           ></div>
         </div>
@@ -4695,7 +4715,10 @@ export default function App() {
                       <button
                         onMouseDown={(e) => {
                           e.preventDefault();
-                          setShowColorPicker(showColorPicker === chapter.id ? null : chapter.id);
+                          const next = showColorPicker === chapter.id ? null : chapter.id;
+                          setShowEmojiPicker(null);
+                          setShowSpeedPicker(null);
+                          setShowColorPicker(next);
                         }}
                         className="p-2 hover:bg-gray-600 rounded flex items-center gap-1 picker-button"
                         title="Text color"
@@ -4751,7 +4774,10 @@ export default function App() {
                       <button
                         onMouseDown={(e) => {
                           e.preventDefault();
-                          setShowEmojiPicker(showEmojiPicker === chapter.id ? null : chapter.id);
+                          const next = showEmojiPicker === chapter.id ? null : chapter.id;
+                          setShowColorPicker(null);
+                          setShowSpeedPicker(null);
+                          setShowEmojiPicker(next);
                         }}
                         className="px-3 py-2 hover:bg-gray-600 rounded text-sm flex items-center gap-1 picker-button"
                         title="Insert emoji"
@@ -4822,6 +4848,28 @@ export default function App() {
                       if (e.target.closest('button')) return;
                       saveSelection(chapter.id);
                       checkActiveFormats(chapter.id);
+                    }}
+                    onKeyDown={(e) => {
+                      // Pressing Enter on an empty list item exits the list
+                      // (the user typically presses Enter twice — first creates
+                      // an empty <li>, second exits via this branch).
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        const sel = window.getSelection();
+                        if (sel && sel.rangeCount) {
+                          const node = sel.getRangeAt(0).startContainer;
+                          const el = node.nodeType === 1 ? node : node.parentElement;
+                          const li = el?.closest('li');
+                          if (li && li.textContent.trim() === '') {
+                            e.preventDefault();
+                            // Outdent twice — once removes the empty <li>, once exits the list
+                            document.execCommand('outdent', false, null);
+                            setTimeout(() => {
+                              updateChapter(chapter.id, 'content', e.currentTarget.innerHTML);
+                              checkActiveFormats(chapter.id);
+                            }, 0);
+                          }
+                        }
+                      }
                     }}
                     onKeyUp={(e) => {
                       // Save on arrow keys and other navigation
@@ -4953,6 +5001,21 @@ export default function App() {
                       <span className="text-sm">Show timer & speed in presenter window</span>
                     </label>
                   </div>
+                  <div className="mt-3">
+                    <label className="block text-sm mb-2">
+                      Delayed start: <span className="text-purple-400">{countdownDuration === 0 ? 'Off' : `${countdownDuration}s`}</span>
+                    </label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="10"
+                      step="1"
+                      value={countdownDuration}
+                      onChange={(e) => setCountdownDuration(parseInt(e.target.value, 10))}
+                      className="w-full"
+                    />
+                    <div className="text-xs text-gray-400 mt-1">Counts down on operator + presenter, then waits 1s before scrolling. 0 disables.</div>
+                  </div>
                 </div>
 
                 {/* Display Settings */}
@@ -5049,60 +5112,43 @@ export default function App() {
                   />
                 </div>
 
-                <div>
-                  <label className="block text-sm mb-2">Crosshair Color</label>
-                  <input
-                    type="color"
-                    value={crosshairColor}
-                    onChange={(e) => setCrosshairColor(e.target.value)}
-                    className="w-full h-10 rounded cursor-pointer"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm mb-2">
-                    Crosshair Length: <span className="text-purple-400">{crosshairLength}px</span>
-                  </label>
-                  <input
-                    type="range"
-                    min="10"
-                    max="200"
-                    step="1"
-                    value={crosshairLength}
-                    onChange={(e) => setCrosshairLength(parseInt(e.target.value, 10))}
-                    className="w-full"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm mb-2">
-                    Crosshair Thickness: <span className="text-purple-400">{crosshairThickness}px</span>
-                  </label>
-                  <input
-                    type="range"
-                    min="1"
-                    max="10"
-                    step="1"
-                    value={crosshairThickness}
-                    onChange={(e) => setCrosshairThickness(parseInt(e.target.value, 10))}
-                    className="w-full"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm mb-2">
-                    Delayed start: <span className="text-purple-400">{countdownDuration === 0 ? 'Off' : `${countdownDuration}s`}</span>
-                  </label>
-                  <input
-                    type="range"
-                    min="0"
-                    max="10"
-                    step="1"
-                    value={countdownDuration}
-                    onChange={(e) => setCountdownDuration(parseInt(e.target.value, 10))}
-                    className="w-full"
-                  />
-                  <div className="text-xs text-gray-400 mt-1">Counts down on operator + presenter before play. 0 disables.</div>
+                <div className="col-span-3">
+                  <label className="block text-sm mb-2">Crosshair</label>
+                  <div className="grid grid-cols-3 gap-4 items-end">
+                    <div>
+                      <div className="text-xs text-gray-400 mb-1">Color</div>
+                      <input
+                        type="color"
+                        value={crosshairColor}
+                        onChange={(e) => setCrosshairColor(e.target.value)}
+                        className="w-full h-10 rounded cursor-pointer"
+                      />
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-400 mb-1">Length: <span className="text-purple-400">{crosshairLength}px</span></div>
+                      <input
+                        type="range"
+                        min="10"
+                        max="200"
+                        step="1"
+                        value={crosshairLength}
+                        onChange={(e) => setCrosshairLength(parseInt(e.target.value, 10))}
+                        className="w-full"
+                      />
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-400 mb-1">Thickness: <span className="text-purple-400">{crosshairThickness}px</span></div>
+                      <input
+                        type="range"
+                        min="1"
+                        max="10"
+                        step="1"
+                        value={crosshairThickness}
+                        onChange={(e) => setCrosshairThickness(parseInt(e.target.value, 10))}
+                        className="w-full"
+                      />
+                    </div>
+                  </div>
                 </div>
 
               </div>
