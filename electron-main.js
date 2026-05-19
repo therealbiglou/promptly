@@ -925,6 +925,39 @@ function startRemoteServer() {
           }
           .reset:active { background: #dc2626; }
 
+          .toggle-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 10px;
+          }
+          .toggle-row button {
+            background: #374151;
+            color: white;
+            font-size: 14px;
+            padding: 12px 8px;
+            gap: 6px;
+            min-height: 56px;
+          }
+          .toggle-row button.on {
+            background: #3b82f6;
+          }
+          .toggle-row button:active { opacity: 0.85; }
+          .toggle-row .toggle-label {
+            font-size: 11px;
+            color: #d1d5db;
+            font-weight: normal;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+          }
+          .toggle-row button.on .toggle-label {
+            color: #dbeafe;
+          }
+          .toggle-row .toggle-state {
+            font-size: 15px;
+            font-weight: 600;
+          }
+
           .icon {
             font-size: 24px;
             font-style: normal;
@@ -997,6 +1030,17 @@ function startRemoteServer() {
             <span class="icon">↺</span>
             <span>Reset Script</span>
           </button>
+
+          <div class="toggle-row">
+            <button id="countdown-toggle" onclick="toggleAndRefresh('toggle-countdown')">
+              <div class="toggle-label">Delayed Start</div>
+              <div class="toggle-state" id="countdown-state">…</div>
+            </button>
+            <button id="timer-toggle" onclick="toggleAndRefresh('toggle-timer-speed')">
+              <div class="toggle-label">Timer &amp; Speed</div>
+              <div class="toggle-state" id="timer-state">…</div>
+            </button>
+          </div>
         </div>
         <div class="status" id="status">Connected</div>
 
@@ -1011,11 +1055,43 @@ function startRemoteServer() {
               const settings = await response.json();
               if (settings.speedIncrement !== undefined) {
                 currentSpeedIncrement = settings.speedIncrement;
-                console.log('Speed increment set to:', currentSpeedIncrement);
               }
+              updateToggleUI(settings);
             } catch (error) {
               console.error('Failed to fetch settings:', error);
             }
+          }
+
+          function updateToggleUI(settings) {
+            const cdBtn = document.getElementById('countdown-toggle');
+            const cdState = document.getElementById('countdown-state');
+            const tBtn = document.getElementById('timer-toggle');
+            const tState = document.getElementById('timer-state');
+            if (cdBtn && cdState) {
+              const dur = settings.countdownDuration || 0;
+              if (dur > 0) {
+                cdBtn.classList.add('on');
+                cdState.textContent = dur + 's';
+              } else {
+                cdBtn.classList.remove('on');
+                cdState.textContent = 'Off';
+              }
+            }
+            if (tBtn && tState) {
+              if (settings.showTimerSpeed) {
+                tBtn.classList.add('on');
+                tState.textContent = 'Shown';
+              } else {
+                tBtn.classList.remove('on');
+                tState.textContent = 'Hidden';
+              }
+            }
+          }
+
+          async function toggleAndRefresh(command) {
+            await sendCommand(command);
+            // Give the operator a moment to flip state, then re-pull settings.
+            setTimeout(fetchSettings, 150);
           }
 
           // Fetch chapter list from main app

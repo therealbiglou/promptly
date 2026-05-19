@@ -3591,6 +3591,17 @@ export default function App() {
               jumpToChapter(value);
             }
             break;
+          case 'toggle-countdown':
+            if (countdownDuration > 0) {
+              lastCountdownDurationRef.current = countdownDuration;
+              setCountdownDuration(0);
+            } else {
+              setCountdownDuration(lastCountdownDurationRef.current || 3);
+            }
+            break;
+          case 'toggle-timer-speed':
+            setShowTimerSpeed(v => !v);
+            break;
           case 'reset':
             cancelCountdown();
             scrollPositionRef.current = 0;
@@ -3661,14 +3672,16 @@ export default function App() {
   useEffect(() => {
     window.getRemoteSettings = () => {
       return {
-        speedIncrement: speedIncrement
+        speedIncrement: speedIncrement,
+        countdownDuration: countdownDuration,
+        showTimerSpeed: showTimerSpeed
       };
     };
 
     return () => {
       delete window.getRemoteSettings;
     };
-  }, [speedIncrement]);
+  }, [speedIncrement, countdownDuration, showTimerSpeed]);
 
   // Expose chapters to remote control interface
   useEffect(() => {
