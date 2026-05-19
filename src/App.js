@@ -3592,8 +3592,10 @@ export default function App() {
             }
             break;
           case 'toggle-countdown':
-            if (countdownDuration > 0) {
-              lastCountdownDurationRef.current = countdownDuration;
+            // Read via ref — the remote command effect has [] deps so the
+            // closure-captured countdownDuration is stuck at the initial value.
+            if (countdownDurationRef.current > 0) {
+              lastCountdownDurationRef.current = countdownDurationRef.current;
               setCountdownDuration(0);
             } else {
               setCountdownDuration(lastCountdownDurationRef.current || 3);
