@@ -212,6 +212,8 @@ export default function App() {
   const operatorSpotlightCircleRef = useRef(null);
   const countdownIntervalRef = useRef(null);
   const countdownPauseTimeoutRef = useRef(null);
+  const countdownActiveRef = useRef(false); // refs are read live, immune to closure staleness in keyboard handler
+  const lastCountdownDurationRef = useRef(3); // remembers the last non-zero countdown value for the toolbar toggle
   const presenterWindowScrollRef = useRef(null);
   const previewVideoRef = useRef(null); // For video stream of presenter window
   const previewStreamRef = useRef(null); // Store the MediaStream for cleanup
@@ -2287,7 +2289,7 @@ export default function App() {
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, [showFullscreen, hasReachedEnd, chapterPositions, speedIncrement, keyboardShortcuts, presenterWindow]);
+  }, [showFullscreen, hasReachedEnd, chapterPositions, speedIncrement, keyboardShortcuts, presenterWindow, countdownDuration]);
 
   // Listen for presenter window dimension updates for 1:1 operator preview
   useEffect(() => {
@@ -3006,6 +3008,7 @@ export default function App() {
   };
 
   const cancelCountdown = () => {
+    countdownActiveRef.current = false;
     if (countdownIntervalRef.current) {
       clearInterval(countdownIntervalRef.current);
       countdownIntervalRef.current = null;
@@ -3022,6 +3025,7 @@ export default function App() {
 
   const startCountdown = (onComplete) => {
     cancelCountdown();
+    countdownActiveRef.current = true;
     let remaining = countdownDuration;
     setCountdownValue(remaining);
     if (window.electron?.updatePresenterCountdown) {
@@ -3039,6 +3043,7 @@ export default function App() {
         // before starting playback so there's breathing room for the presenter.
         clearInterval(countdownIntervalRef.current);
         countdownIntervalRef.current = null;
+        countdownActiveRef.current = false; // ticking phase over; pause-timeout phase begins
         setCountdownValue(null);
         if (window.electron?.updatePresenterCountdown) {
           window.electron.updatePresenterCountdown(null);
@@ -3053,7 +3058,8 @@ export default function App() {
 
   const togglePlayPause = () => {
     // Mid-countdown or mid-pause: clicking again aborts and stays paused.
-    if (countdownValue !== null || countdownPauseTimeoutRef.current) {
+    // Refs are immune to the keyboard handler's closure staleness.
+    if (countdownActiveRef.current || countdownPauseTimeoutRef.current) {
       cancelCountdown();
       return;
     }
@@ -5011,7 +5017,11 @@ export default function App() {
                       max="10"
                       step="1"
                       value={countdownDuration}
-                      onChange={(e) => setCountdownDuration(parseInt(e.target.value, 10))}
+                      onChange={(e) => {
+                        const v = parseInt(e.target.value, 10);
+                        if (v > 0) lastCountdownDurationRef.current = v;
+                        setCountdownDuration(v);
+                      }}
                       className="w-full"
                     />
                     <div className="text-xs text-gray-400 mt-1">Counts down on operator + presenter, then waits 1s before scrolling. 0 disables.</div>
@@ -5293,7 +5303,100 @@ export default function App() {
 
         {/* Preview Side */}
         <div className="flex flex-col bg-gray-800" style={{ width: `${100 - previewWidth}%` }}>
-          <div className="p-3 border-b border-gray-700 flex flex-wrap items-center gap-2">
+          <div className="p-3 border-b border-gray-700 flex flex-col gap-2">
+            {/* Top row: window controls, left aligned */}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={openPresenterWindow}
+                className={`px-4 py-2 rounded flex items-center gap-2 ${
+                  presenterWindow && !presenterWindow.closed
+                    ? 'bg-blue-500 hover:bg-blue-600 ring-2 ring-blue-300'
+                    : 'bg-blue-600 hover:bg-blue-700'
+                }`}
+                title={presenterWindow && !presenterWindow.closed
+                  ? "Presenter window is open - click to refresh"
+                  : "Open presenter in separate window"}
+              >
+                <Monitor size={16} />
+                {presenterWindow && !presenterWindow.closed ? 'Window Open ✓' : 'Open Presenter Window'}
+              </button>
+
+              {presenterWindow && !presenterWindow.closed && (
+                <button
+                  onClick={() => {
+                    if (window.electron?.togglePresenterFullscreen) {
+                      window.electron.togglePresenterFullscreen(!presenterFullscreen);
+                    }
+                  }}
+                  className={`px-4 py-2 rounded flex items-center gap-2 ${
+                    presenterFullscreen
+                      ? 'bg-purple-500 hover:bg-purple-600 ring-2 ring-purple-300'
+                      : 'bg-purple-600 hover:bg-purple-700'
+                  }`}
+                  title={presenterFullscreen ? "Exit fullscreen on presenter window" : "Enter fullscreen on presenter window"}
+                >
+                  <Maximize2 size={16} />
+                  {presenterFullscreen ? 'Full Screen ✓' : 'Full Screen'}
+                </button>
+              )}
+
+              {presenterWindow && !presenterWindow.closed && displays.length > 1 && (() => {
+                const selected = displays.find(d => d.id === presenterDisplayId);
+                const formatLabel = (d, i) => {
+                  const w = d.size?.width ?? d.bounds?.width;
+                  const h = d.size?.height ?? d.bounds?.height;
+                  const prefix = d.label ? `${d.label} — ` : '';
+                  const suffix = d.primary ? ' — Primary' : '';
+                  return `${prefix}Monitor ${i + 1} (${w}×${h})${suffix}`;
+                };
+                const triggerText = selected
+                  ? `Monitor ${displays.findIndex(d => d.id === selected.id) + 1}`
+                  : 'Auto';
+                return (
+                  <div className="relative display-picker">
+                    <button
+                      onClick={() => setShowDisplayDropdown(v => !v)}
+                      className="px-3 py-2 rounded flex items-center gap-1 bg-gray-700 hover:bg-gray-600 text-sm"
+                      title="Choose which monitor the presenter fullscreens to"
+                    >
+                      <Monitor size={14} />
+                      {triggerText}
+                      <ChevronDown size={14} />
+                    </button>
+                    {showDisplayDropdown && (
+                      <div className="absolute top-full left-0 mt-2 bg-gray-700 rounded-lg shadow-lg border border-gray-600 z-50" style={{ minWidth: '240px' }}>
+                        <button
+                          onClick={() => {
+                            window.electron?.setPresenterDisplay?.(null);
+                            setPresenterDisplayId(null);
+                            setShowDisplayDropdown(false);
+                          }}
+                          className={`w-full px-3 py-2 hover:bg-gray-600 text-left border-b border-gray-600 text-sm ${presenterDisplayId === null ? 'bg-purple-600/40 font-semibold' : ''}`}
+                        >
+                          Auto (current monitor)
+                        </button>
+                        {displays.map((d, i) => (
+                          <button
+                            key={d.id}
+                            onClick={() => {
+                              window.electron?.setPresenterDisplay?.(d.id);
+                              setPresenterDisplayId(d.id);
+                              setShowDisplayDropdown(false);
+                            }}
+                            className={`w-full px-3 py-2 hover:bg-gray-600 text-left border-b border-gray-600 last:border-b-0 text-sm ${presenterDisplayId === d.id ? 'bg-purple-600/40 font-semibold' : ''}`}
+                          >
+                            {formatLabel(d, i)}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Bottom row: playback + modes, left aligned */}
+            <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={togglePlayPause}
               disabled={!presenterWindow || presenterWindow.closed}
@@ -5419,91 +5522,40 @@ export default function App() {
             </button>
 
             <button
-              onClick={openPresenterWindow}
-              className={`ml-auto px-4 py-2 rounded flex items-center gap-2 ${
-                presenterWindow && !presenterWindow.closed
+              onClick={() => {
+                if (countdownDuration > 0) {
+                  lastCountdownDurationRef.current = countdownDuration;
+                  setCountdownDuration(0);
+                } else {
+                  setCountdownDuration(lastCountdownDurationRef.current || 3);
+                }
+              }}
+              className={`p-2 rounded-lg ${
+                countdownDuration > 0
                   ? 'bg-blue-500 hover:bg-blue-600 ring-2 ring-blue-300'
-                  : 'bg-blue-600 hover:bg-blue-700'
+                  : 'bg-gray-700 hover:bg-gray-600'
               }`}
-              title={presenterWindow && !presenterWindow.closed
-                ? "Presenter window is open - click to refresh"
-                : "Open presenter in separate window"}
+              title={countdownDuration > 0
+                ? `Delayed start: ${countdownDuration}s — click to disable`
+                : 'Delayed start: off — click to enable'}
             >
-              <Monitor size={16} />
-              {presenterWindow && !presenterWindow.closed ? 'Window Open ✓' : 'Open Presenter Window'}
+              <Timer size={20} />
             </button>
-            {presenterWindow && !presenterWindow.closed && displays.length > 1 && (() => {
-              const selected = displays.find(d => d.id === presenterDisplayId);
-              const formatLabel = (d, i) => {
-                const w = d.size?.width ?? d.bounds?.width;
-                const h = d.size?.height ?? d.bounds?.height;
-                const prefix = d.label ? `${d.label} — ` : '';
-                const suffix = d.primary ? ' — Primary' : '';
-                return `${prefix}Monitor ${i + 1} (${w}×${h})${suffix}`;
-              };
-              const triggerText = selected
-                ? `Monitor ${displays.findIndex(d => d.id === selected.id) + 1}`
-                : 'Auto';
-              return (
-                <div className="relative display-picker">
-                  <button
-                    onClick={() => setShowDisplayDropdown(v => !v)}
-                    className="px-3 py-2 rounded flex items-center gap-1 bg-gray-700 hover:bg-gray-600 text-sm"
-                    title="Choose which monitor the presenter fullscreens to"
-                  >
-                    <Monitor size={14} />
-                    {triggerText}
-                    <ChevronDown size={14} />
-                  </button>
-                  {showDisplayDropdown && (
-                    <div className="absolute top-full right-0 mt-2 bg-gray-700 rounded-lg shadow-lg border border-gray-600 z-50" style={{ minWidth: '240px' }}>
-                      <button
-                        onClick={() => {
-                          window.electron?.setPresenterDisplay?.(null);
-                          setPresenterDisplayId(null);
-                          setShowDisplayDropdown(false);
-                        }}
-                        className={`w-full px-3 py-2 hover:bg-gray-600 text-left border-b border-gray-600 text-sm ${presenterDisplayId === null ? 'bg-purple-600/40 font-semibold' : ''}`}
-                      >
-                        Auto (current monitor)
-                      </button>
-                      {displays.map((d, i) => (
-                        <button
-                          key={d.id}
-                          onClick={() => {
-                            window.electron?.setPresenterDisplay?.(d.id);
-                            setPresenterDisplayId(d.id);
-                            setShowDisplayDropdown(false);
-                          }}
-                          className={`w-full px-3 py-2 hover:bg-gray-600 text-left border-b border-gray-600 last:border-b-0 text-sm ${presenterDisplayId === d.id ? 'bg-purple-600/40 font-semibold' : ''}`}
-                        >
-                          {formatLabel(d, i)}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
 
-            {presenterWindow && !presenterWindow.closed && (
-              <button
-                onClick={() => {
-                  if (window.electron?.togglePresenterFullscreen) {
-                    window.electron.togglePresenterFullscreen(!presenterFullscreen);
-                  }
-                }}
-                className={`px-4 py-2 rounded flex items-center gap-2 ${
-                  presenterFullscreen
-                    ? 'bg-purple-500 hover:bg-purple-600 ring-2 ring-purple-300'
-                    : 'bg-purple-600 hover:bg-purple-700'
-                }`}
-                title={presenterFullscreen ? "Exit fullscreen on presenter window" : "Enter fullscreen on presenter window"}
-              >
-                <Maximize2 size={16} />
-                {presenterFullscreen ? 'Full Screen ✓' : 'Full Screen'}
-              </button>
-            )}
+            <button
+              onClick={() => setShowTimerSpeed(v => !v)}
+              className={`p-2 rounded-lg ${
+                showTimerSpeed
+                  ? 'bg-blue-500 hover:bg-blue-600 ring-2 ring-blue-300'
+                  : 'bg-gray-700 hover:bg-gray-600'
+              }`}
+              title={showTimerSpeed
+                ? 'Timer & speed shown in presenter — click to hide'
+                : 'Timer & speed hidden — click to show in presenter'}
+            >
+              {showTimerSpeed ? <Eye size={20} /> : <EyeOff size={20} />}
+            </button>
+            </div>
           </div>
           <div className="flex-1 relative overflow-hidden bg-gray-700">
             {presenterRequiredToast && (
