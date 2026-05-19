@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Play, Pause, Settings, FileText, Download, Upload, Edit2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronUp, ChevronDown, List, Plus, GripVertical, Trash2, Maximize2, Eye, EyeOff, Monitor, Bold, Italic, Underline, Palette, AlertCircle, Timer, Zap, Scissors, Clock, Type, Droplet, Move, BookOpen, Target, Check, X, FileDown } from 'lucide-react';
+import { Play, Pause, Settings, FileText, Download, Upload, Edit2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronUp, ChevronDown, List, Plus, GripVertical, Trash2, Maximize2, Eye, EyeOff, Monitor, Bold, Italic, Underline, Palette, AlertCircle, Timer, Zap, Scissors, Clock, Type, Droplet, Move, BookOpen, Target, Check, X, FileDown, ArrowUpDown, Crosshair } from 'lucide-react';
 import QRCode from 'qrcode';
 import { jsPDF } from 'jspdf';
 
@@ -67,6 +67,7 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [manualScrollMode, setManualScrollMode] = useState(false); // Jog mode - allows manual scrolling with mouse wheel
   const [spotlightMode, setSpotlightMode] = useState(false); // Mouse spotlight mode - shows cursor position on presenter
+  const [presenterRequiredToast, setPresenterRequiredToast] = useState(false);
   const [scrollSpeed, setScrollSpeed] = useState(1.5);
   const [activeScrollSpeed, setActiveScrollSpeed] = useState(1.5); // Current speed being used (may differ from scrollSpeed if chapter has custom speed)
   const [scrollPosition, setScrollPosition] = useState(0);
@@ -185,6 +186,8 @@ export default function App() {
   const scrollRef = useRef(null);
   const previewScrollRef = useRef(null); // For operator preview scroll sync
   const operatorPanelRef = useRef(null); // For measuring operator panel width
+  const presenterRequiredToastTimeoutRef = useRef(null);
+  const operatorSpotlightCircleRef = useRef(null);
   const presenterWindowScrollRef = useRef(null);
   const previewVideoRef = useRef(null); // For video stream of presenter window
   const previewStreamRef = useRef(null); // Store the MediaStream for cleanup
@@ -1947,6 +1950,50 @@ export default function App() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showColorPicker, showEmojiPicker, showSpeedPicker]);
 
+  const showPresenterRequiredToast = () => {
+    setPresenterRequiredToast(true);
+    if (presenterRequiredToastTimeoutRef.current) {
+      clearTimeout(presenterRequiredToastTimeoutRef.current);
+    }
+    presenterRequiredToastTimeoutRef.current = setTimeout(() => {
+      setPresenterRequiredToast(false);
+      presenterRequiredToastTimeoutRef.current = null;
+    }, 3000);
+  };
+
+  const toggleManualScroll = () => {
+    if (!presenterWindow || presenterWindow.closed) {
+      showPresenterRequiredToast();
+      return;
+    }
+    setManualScrollMode(prev => {
+      if (!prev) setIsPlaying(false);
+      return !prev;
+    });
+  };
+
+  const toggleSpotlight = () => {
+    if (!presenterWindow || presenterWindow.closed) {
+      showPresenterRequiredToast();
+      return;
+    }
+    setSpotlightMode(prev => {
+      const newMode = !prev;
+      if (!newMode && window.electron?.updatePresenterSpotlight) {
+        window.electron.updatePresenterSpotlight(null);
+      }
+      return newMode;
+    });
+  };
+
+  useEffect(() => {
+    return () => {
+      if (presenterRequiredToastTimeoutRef.current) {
+        clearTimeout(presenterRequiredToastTimeoutRef.current);
+      }
+    };
+  }, []);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -1991,20 +2038,10 @@ export default function App() {
         timerStartTimestampRef.current = null;
       } else if (matchesAnyShortcut(e, keyboardShortcuts.manualScroll)) {
         e.preventDefault();
-        setManualScrollMode(prev => !prev);
-        if (!manualScrollMode) {
-          setIsPlaying(false); // Pause playback when entering manual scroll mode
-        }
+        toggleManualScroll();
       } else if (matchesAnyShortcut(e, keyboardShortcuts.spotlight)) {
         e.preventDefault();
-        setSpotlightMode(prev => {
-          const newMode = !prev;
-          // Clear spotlight when turning off
-          if (!newMode && window.electron?.updatePresenterSpotlight) {
-            window.electron.updatePresenterSpotlight(null);
-          }
-          return newMode;
-        });
+        toggleSpotlight();
       } else if (e.key === 'Escape' && showFullscreen) {
         e.preventDefault();
         setShowFullscreen(false);
@@ -2158,25 +2195,16 @@ export default function App() {
         pausedElapsedRef.current = 0;
         timerStartTimestampRef.current = null;
       } else if (matchesAnyShortcut(syntheticEvent, keyboardShortcuts.manualScroll)) {
-        setManualScrollMode(prev => !prev);
-        if (!manualScrollMode) {
-          setIsPlaying(false); // Pause playback when entering manual scroll mode
-        }
+        toggleManualScroll();
       } else if (matchesAnyShortcut(syntheticEvent, keyboardShortcuts.spotlight)) {
-        setSpotlightMode(prev => {
-          const newMode = !prev;
-          if (!newMode && window.electron?.updatePresenterSpotlight) {
-            window.electron.updatePresenterSpotlight(null);
-          }
-          return newMode;
-        });
+        toggleSpotlight();
       }
     });
 
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, [showFullscreen, hasReachedEnd, chapterPositions, speedIncrement, keyboardShortcuts]);
+  }, [showFullscreen, hasReachedEnd, chapterPositions, speedIncrement, keyboardShortcuts, presenterWindow]);
 
   // Listen for presenter window dimension updates for 1:1 operator preview
   useEffect(() => {
@@ -3836,37 +3864,45 @@ export default function App() {
 
     // Handle mouse move for spotlight mode
     const handleSpotlightMove = (e) => {
-      if (!spotlightMode || !window.electron?.updatePresenterSpotlight) return;
+      if (!spotlightMode) return;
 
-      // Get the wrapper element (the scaled preview container)
       const wrapper = e.currentTarget;
       const rect = wrapper.getBoundingClientRect();
-
-      // Get mouse position relative to the wrapper
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
 
-      // Convert from scaled preview to actual presenter coordinates
-      const actualX = x / previewScale;
-      const actualY = y / previewScale;
+      // Mirror the presenter's red circle on the operator preview (in scaled-preview coords)
+      if (operatorSpotlightCircleRef.current) {
+        operatorSpotlightCircleRef.current.style.display = 'block';
+        operatorSpotlightCircleRef.current.style.left = x + 'px';
+        operatorSpotlightCircleRef.current.style.top = y + 'px';
+      }
 
-      // Send spotlight position to presenter window
-      window.electron.updatePresenterSpotlight({ x: actualX, y: actualY });
+      // Send spotlight position to presenter window in presenter-coordinate space
+      if (window.electron?.updatePresenterSpotlight) {
+        const actualX = x / previewScale;
+        const actualY = y / previewScale;
+        window.electron.updatePresenterSpotlight({ x: actualX, y: actualY });
+      }
     };
 
     // Handle mouse leave to hide spotlight
     const handleSpotlightLeave = () => {
+      if (operatorSpotlightCircleRef.current) {
+        operatorSpotlightCircleRef.current.style.display = 'none';
+      }
       if (spotlightMode && window.electron?.updatePresenterSpotlight) {
         window.electron.updatePresenterSpotlight(null);
       }
     };
 
+    const operatorCircleDiameter = 80 * previewScale;
+
     return (
       <div
         ref={operatorPanelRef}
-        className="h-full w-full flex items-center justify-center"
+        className="h-full w-full flex items-center justify-center bg-gray-700"
         style={{
-          backgroundColor: bgColor,
           cursor: manualScrollMode ? 'ns-resize' : (spotlightMode ? 'crosshair' : 'default')
         }}
         onWheel={manualScrollMode ? (e) => {
@@ -3874,18 +3910,24 @@ export default function App() {
           handleManualScroll(e.deltaY);
         } : undefined}
       >
-        {/* Manual scroll mode indicator */}
-        {manualScrollMode && (
-          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 bg-yellow-500 text-black px-3 py-1 rounded-full text-xs font-bold">
-            SCROLL MODE (J to exit)
-          </div>
-        )}
-        {/* Spotlight mode indicator */}
-        {spotlightMode && !manualScrollMode && (
-          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 bg-red-500 text-white px-3 py-1 rounded-full text-xs font-bold">
-            SPOTLIGHT MODE (S to exit)
-          </div>
-        )}
+        {/* Stacked mode indicators + toast */}
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1">
+          {presenterRequiredToast && (
+            <div className="bg-amber-500 text-black px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1">
+              <AlertCircle size={14} /> Open the presenter window to use this mode
+            </div>
+          )}
+          {manualScrollMode && (
+            <div className="bg-yellow-500 text-black px-3 py-1 rounded-full text-xs font-bold">
+              SCROLL MODE (J to exit)
+            </div>
+          )}
+          {spotlightMode && (
+            <div className="bg-red-500 text-white px-3 py-1 rounded-full text-xs font-bold">
+              SPOTLIGHT MODE (S to exit)
+            </div>
+          )}
+        </div>
         {/* Wrapper that constrains to scaled dimensions */}
         <div
           style={{
@@ -3898,6 +3940,23 @@ export default function App() {
           onMouseMove={spotlightMode ? handleSpotlightMove : undefined}
           onMouseLeave={spotlightMode ? handleSpotlightLeave : undefined}
         >
+          {/* Operator-side spotlight circle (mirrors presenter, scaled to preview) */}
+          {spotlightMode && (
+            <div
+              ref={operatorSpotlightCircleRef}
+              style={{
+                position: 'absolute',
+                width: `${operatorCircleDiameter}px`,
+                height: `${operatorCircleDiameter}px`,
+                borderRadius: '50%',
+                background: 'rgba(239, 68, 68, 0.5)',
+                pointerEvents: 'none',
+                transform: 'translate(-50%, -50%)',
+                zIndex: 30,
+                display: 'none'
+              }}
+            />
+          )}
           {/* Inner container at full size, then scaled */}
           <div
             style={{
@@ -4907,7 +4966,7 @@ export default function App() {
 
         {/* Preview Side */}
         <div className="flex flex-col bg-gray-800" style={{ width: `${100 - previewWidth}%` }}>
-          <div className="p-3 border-b border-gray-700 flex items-center gap-2">
+          <div className="p-3 border-b border-gray-700 flex flex-wrap items-center gap-2">
             <button
               onClick={togglePlayPause}
               disabled={!presenterWindow || presenterWindow.closed}
@@ -5000,11 +5059,41 @@ export default function App() {
               </div>
             )}
 
-            <div className="flex-1"></div>
+            <button
+              onClick={toggleManualScroll}
+              className={`p-2 rounded-lg ${
+                manualScrollMode
+                  ? 'bg-yellow-500 hover:bg-yellow-600 ring-2 ring-yellow-300 text-black'
+                  : 'bg-gray-700 hover:bg-gray-600'
+              }`}
+              title={
+                !presenterWindow || presenterWindow.closed
+                  ? 'Manual scroll mode — requires presenter window'
+                  : manualScrollMode ? 'Exit manual scroll mode (J)' : 'Manual scroll mode (J)'
+              }
+            >
+              <ArrowUpDown size={20} />
+            </button>
+
+            <button
+              onClick={toggleSpotlight}
+              className={`p-2 rounded-lg ${
+                spotlightMode
+                  ? 'bg-red-500 hover:bg-red-600 ring-2 ring-red-300 text-white'
+                  : 'bg-gray-700 hover:bg-gray-600'
+              }`}
+              title={
+                !presenterWindow || presenterWindow.closed
+                  ? 'Mouse spotlight — requires presenter window'
+                  : spotlightMode ? 'Exit mouse spotlight (S)' : 'Mouse spotlight (S)'
+              }
+            >
+              <Crosshair size={20} />
+            </button>
 
             <button
               onClick={openPresenterWindow}
-              className={`px-4 py-2 rounded flex items-center gap-2 ${
+              className={`ml-auto px-4 py-2 rounded flex items-center gap-2 ${
                 presenterWindow && !presenterWindow.closed
                   ? 'bg-blue-500 hover:bg-blue-600 ring-2 ring-blue-300'
                   : 'bg-blue-600 hover:bg-blue-700'
@@ -5035,7 +5124,7 @@ export default function App() {
               </button>
             )}
           </div>
-          <div className="flex-1 relative overflow-hidden" style={{ backgroundColor: bgColor }}>
+          <div className="flex-1 relative overflow-hidden bg-gray-700">
             <div key="preview-content" className="h-full relative z-10">
               {renderOperatorPreview()}
             </div>
