@@ -18,6 +18,7 @@ let presenterWindow;
 let presenterWindowBounds = { width: 1920, height: 1080, x: 100, y: 100 }; // Default bounds
 let presenterBeforeFullscreenBounds = null; // Store bounds before fullscreen
 let presenterTargetDisplayId = null; // Display id to move presenter to before going fullscreen (null = current)
+let suppressFullscreenNotification = false; // True while the move-while-fullscreen dance is running
 
 // Remote control server
 let remoteServer = null;
@@ -304,7 +305,7 @@ function createPresenterWindow() {
   // IPC handler before setFullScreen(true), and continuously by the resize/move
   // debounce while not fullscreen.
   presenterWindow.on('enter-full-screen', () => {
-    if (presenterWindow && !presenterWindow.isDestroyed()) {
+    if (presenterWindow && !presenterWindow.isDestroyed() && !suppressFullscreenNotification) {
       presenterWindow.webContents.send('presenter-fullscreen-changed', true);
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('presenter-fullscreen-changed', true);
@@ -313,19 +314,22 @@ function createPresenterWindow() {
   });
 
   presenterWindow.on('leave-full-screen', () => {
-    if (presenterWindow && !presenterWindow.isDestroyed()) {
-      presenterWindow.webContents.send('presenter-fullscreen-changed', false);
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('presenter-fullscreen-changed', false);
-      }
-      // Restore bounds: prefer the snapshot taken at toggle time;
-      // fall back to last-known non-fullscreen bounds (covers F11 / system shortcut).
-      const restoreTo = presenterBeforeFullscreenBounds || presenterWindowBounds;
-      if (restoreTo) {
-        presenterWindow.setBounds(restoreTo);
-      }
-      presenterBeforeFullscreenBounds = null;
+    if (!presenterWindow || presenterWindow.isDestroyed()) return;
+    // During the move-while-fullscreen dance, skip both the notification and
+    // the bounds-restore — the dance sets its own explicit bounds afterward.
+    if (suppressFullscreenNotification) return;
+
+    presenterWindow.webContents.send('presenter-fullscreen-changed', false);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('presenter-fullscreen-changed', false);
     }
+    // Restore bounds: prefer the snapshot taken at toggle time;
+    // fall back to last-known non-fullscreen bounds (covers F11 / system shortcut).
+    const restoreTo = presenterBeforeFullscreenBounds || presenterWindowBounds;
+    if (restoreTo) {
+      presenterWindow.setBounds(restoreTo);
+    }
+    presenterBeforeFullscreenBounds = null;
   });
 }
 
@@ -443,6 +447,46 @@ ipcMain.handle('get-presenter-display', () => presenterTargetDisplayId);
 ipcMain.on('set-presenter-display', (event, id) => {
   presenterTargetDisplayId = (typeof id === 'number') ? id : null;
   saveWindowBounds();
+
+  // If presenter is already fullscreen, move it to the new monitor now without
+  // requiring the user to toggle fullscreen off and on.
+  if (!presenterWindow || presenterWindow.isDestroyed()) return;
+  if (!presenterWindow.isFullScreen()) return;
+  if (presenterTargetDisplayId == null) return;
+  const target = screen.getAllDisplays().find(d => d.id === presenterTargetDisplayId);
+  if (!target) return;
+
+  // Compute the window-sized bounds the user will see after they later exit
+  // fullscreen: centered in the new display's work area, sized from the
+  // pre-fullscreen window (or last-known non-fullscreen bounds as fallback).
+  const baseBounds = presenterBeforeFullscreenBounds || presenterWindowBounds;
+  const wantedWidth = Math.min(baseBounds.width, target.workArea.width);
+  const wantedHeight = Math.min(baseBounds.height, target.workArea.height);
+  const nextWindowBounds = {
+    x: target.workArea.x + Math.floor((target.workArea.width - wantedWidth) / 2),
+    y: target.workArea.y + Math.floor((target.workArea.height - wantedHeight) / 2),
+    width: wantedWidth,
+    height: wantedHeight
+  };
+
+  suppressFullscreenNotification = true;
+  presenterWindow.setFullScreen(false);
+  setTimeout(() => {
+    if (!presenterWindow || presenterWindow.isDestroyed()) {
+      suppressFullscreenNotification = false;
+      return;
+    }
+    presenterWindow.setBounds(nextWindowBounds);
+    presenterBeforeFullscreenBounds = nextWindowBounds;
+    setTimeout(() => {
+      if (!presenterWindow || presenterWindow.isDestroyed()) {
+        suppressFullscreenNotification = false;
+        return;
+      }
+      presenterWindow.setFullScreen(true);
+      setTimeout(() => { suppressFullscreenNotification = false; }, 50);
+    }, 50);
+  }, 50);
 });
 
 // Handle window dragging
