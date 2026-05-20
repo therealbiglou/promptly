@@ -10,6 +10,7 @@ const express = require('express');
 const os = require('os');
 const { spawn } = require('child_process');
 const { autoUpdater } = require('electron-updater');
+const { WebSocketServer } = require('ws');
 // Note: pdf-parse is lazy-loaded only when needed to avoid DOMMatrix errors
 
 // Note: GPU acceleration is REQUIRED for transparent windows on Windows
@@ -27,6 +28,8 @@ let cloudflaredProcess = null; // Spawned cloudflared tunnel subprocess
 // Remote control server
 let remoteServer = null;
 let remoteServerPort = 3001;
+let pluginWss = null; // WebSocket server for the Logi plugin (on the same HTTP server, path /plugin)
+let latestPluginState = { isPlaying: false, speed: 1.5, chapterIndex: 0, totalChapters: 0, isCountingDown: false, hasReachedEnd: false };
 
 // Path for storing persistent data
 const userDataPath = app.getPath('userData');
@@ -371,6 +374,23 @@ ipcMain.on('update-presenter-spotlight', (event, position) => {
 ipcMain.on('update-presenter-countdown', (event, value) => {
   if (presenterWindow && !presenterWindow.isDestroyed()) {
     presenterWindow.webContents.send('presenter-countdown-update', value);
+  }
+});
+
+// Renderer pushes the current Promptly state to be broadcast to any connected
+// Logi plugin clients. We merge into latestPluginState so newly-connecting
+// clients get the most recent snapshot on connect.
+ipcMain.on('plugin-state-push', (event, state) => {
+  if (state && typeof state === 'object') {
+    latestPluginState = { ...latestPluginState, ...state };
+  }
+  if (pluginWss) {
+    const payload = JSON.stringify({ type: 'state', ...latestPluginState });
+    pluginWss.clients.forEach(client => {
+      if (client.readyState === 1) {
+        try { client.send(payload); } catch {}
+      }
+    });
   }
 });
 
@@ -1440,6 +1460,37 @@ function startRemoteServer() {
       startCloudflaredTunnel(remoteServerPort);
     });
 
+    // WebSocket endpoint at /plugin for the Logi Plugin Service plugin.
+    // Plugin connects, sends { type: "command", name, value? } frames.
+    // Server pushes { type: "state", ... } snapshots whenever Promptly state changes.
+    pluginWss = new WebSocketServer({ noServer: true });
+    remoteServer.on('upgrade', (request, socket, head) => {
+      const pathname = (request.url || '').split('?')[0];
+      if (pathname === '/plugin') {
+        pluginWss.handleUpgrade(request, socket, head, (ws) => {
+          pluginWss.emit('connection', ws, request);
+        });
+      } else {
+        socket.destroy();
+      }
+    });
+    pluginWss.on('connection', (ws) => {
+      console.log('[plugin] client connected');
+      // Send initial state snapshot
+      try { ws.send(JSON.stringify({ type: 'state', ...latestPluginState })); } catch {}
+      ws.on('message', (data) => {
+        let msg;
+        try { msg = JSON.parse(data.toString()); } catch { return; }
+        if (msg && msg.type === 'command' && msg.name) {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('remote-command', { command: msg.name, value: msg.value });
+          }
+        }
+      });
+      ws.on('close', () => console.log('[plugin] client disconnected'));
+      ws.on('error', (err) => console.error('[plugin] ws error:', err && err.message));
+    });
+
     return { success: true };
   } catch (error) {
     console.error('Failed to start remote server:', error);
@@ -1516,6 +1567,11 @@ function stopRemoteServer() {
   }
 
   stopCloudflaredTunnel();
+
+  if (pluginWss) {
+    try { pluginWss.clients.forEach(c => c.terminate()); pluginWss.close(); } catch {}
+    pluginWss = null;
+  }
 
   remoteServer.close(() => {
     console.log('Remote server stopped');

@@ -2111,7 +2111,7 @@ export default function App() {
         setScrollSpeed(prev => Math.min(prev + speedIncrement, 10));
       } else if (matchesAnyShortcut(e, keyboardShortcuts.speedDown)) {
         e.preventDefault();
-        setScrollSpeed(prev => Math.max(prev - speedIncrement, 0.1));
+        setScrollSpeed(prev => Math.max(prev - speedIncrement, -10));
       } else if (matchesAnyShortcut(e, keyboardShortcuts.prevChapter)) {
         e.preventDefault();
         jumpToPreviousChapter();
@@ -2166,7 +2166,7 @@ export default function App() {
         setScrollSpeed(prev => Math.min(prev + speedIncrement, 10));
       } else if (matchesAnyShortcut(wheelEvent, keyboardShortcuts.speedDown)) {
         e.preventDefault();
-        setScrollSpeed(prev => Math.max(prev - speedIncrement, 0.1));
+        setScrollSpeed(prev => Math.max(prev - speedIncrement, -10));
       } else if (matchesAnyShortcut(wheelEvent, keyboardShortcuts.prevChapter)) {
         e.preventDefault();
         jumpToPreviousChapter();
@@ -2273,7 +2273,7 @@ export default function App() {
       } else if (matchesAnyShortcut(syntheticEvent, keyboardShortcuts.speedUp)) {
         setScrollSpeed(prev => Math.min(prev + speedIncrement, 10));
       } else if (matchesAnyShortcut(syntheticEvent, keyboardShortcuts.speedDown)) {
-        setScrollSpeed(prev => Math.max(prev - speedIncrement, 0.1));
+        setScrollSpeed(prev => Math.max(prev - speedIncrement, -10));
       } else if (matchesAnyShortcut(syntheticEvent, keyboardShortcuts.prevChapter)) {
         jumpToPreviousChapter();
       } else if (matchesAnyShortcut(syntheticEvent, keyboardShortcuts.nextChapter)) {
@@ -3593,7 +3593,7 @@ export default function App() {
           case 'speed-down':
             // Use the value from remote if provided, otherwise use local speedIncrement
             const incrementDown = value !== undefined ? value : speedIncrement;
-            setScrollSpeed(prev => Math.max(prev - incrementDown, 0.1));
+            setScrollSpeed(prev => Math.max(prev - incrementDown, -10));
             break;
           case 'next-chapter':
             jumpToNextChapter();
@@ -3617,6 +3617,47 @@ export default function App() {
             }
             break;
           case 'toggle-timer-speed':
+            setTimerDisplayMode(prev => prev === 'full' ? 'speed' : prev === 'speed' ? 'hidden' : 'full');
+            break;
+          case 'speed-adjust': {
+            // Tick-based speed adjustment from the Logi dial. Each tick = ±0.1x.
+            const ticks = Number(value) || 0;
+            setScrollSpeed(prev => Math.min(10, Math.max(-10, prev + ticks * 0.1)));
+            break;
+          }
+          case 'set-speed': {
+            const target = Number(value);
+            if (Number.isFinite(target)) {
+              setScrollSpeed(Math.min(10, Math.max(-10, target)));
+            }
+            break;
+          }
+          case 'jog': {
+            // Pixel-delta manual scroll without needing manual-scroll-mode toggled.
+            const px = Number(value) || 0;
+            if (px !== 0 && scrollRef.current) {
+              const maxScroll = scrollRef.current.scrollHeight - scrollRef.current.clientHeight;
+              const next = Math.min(maxScroll, Math.max(0, scrollPositionRef.current + px));
+              scrollPositionRef.current = next;
+              setScrollPosition(next);
+            }
+            break;
+          }
+          case 'open-presenter':
+            openPresenterWindow();
+            break;
+          case 'toggle-fullscreen':
+            if (window.electron?.togglePresenterFullscreen) {
+              window.electron.togglePresenterFullscreen(!presenterFullscreen);
+            }
+            break;
+          case 'toggle-manual-scroll':
+            toggleManualScroll();
+            break;
+          case 'toggle-spotlight':
+            toggleSpotlight();
+            break;
+          case 'cycle-timer':
             setTimerDisplayMode(prev => prev === 'full' ? 'speed' : prev === 'speed' ? 'hidden' : 'full');
             break;
           case 'reset':
@@ -3744,6 +3785,19 @@ export default function App() {
     };
     return () => { delete window.getRemoteState; };
   }, [currentChapterIndex, activeScrollSpeed, isPlaying]);
+
+  // Push state to any connected Logi plugin clients (pushed, not polled).
+  useEffect(() => {
+    if (!window.electron?.pushPluginState) return;
+    window.electron.pushPluginState({
+      isPlaying: isPlaying,
+      speed: activeScrollSpeed,
+      chapterIndex: currentChapterIndex,
+      totalChapters: currentScript?.chapters?.length || 0,
+      isCountingDown: countdownValue !== null,
+      hasReachedEnd: hasReachedEnd
+    });
+  }, [isPlaying, activeScrollSpeed, currentChapterIndex, currentScript, countdownValue, hasReachedEnd]);
 
 
   // Note: previewScrollRef is now updated directly in the animation loop (line 1048-1050)
@@ -5031,17 +5085,17 @@ export default function App() {
                   </h3>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm mb-2">Master Scroll Speed: {scrollSpeed.toFixed(1)}x</label>
+                      <label className="block text-sm mb-2">Master Scroll Speed: {scrollSpeed < 0 ? `◀ ${Math.abs(scrollSpeed).toFixed(1)}x` : `${scrollSpeed.toFixed(1)}x`}</label>
                       <input
                         type="range"
-                        min="0.1"
+                        min="-10"
                         max="10"
                         step="0.1"
                         value={scrollSpeed}
                         onChange={(e) => setScrollSpeed(Number(e.target.value))}
                         className="w-full"
                       />
-                      <div className="text-xs text-gray-400 mt-1">0.1x increments</div>
+                      <div className="text-xs text-gray-400 mt-1">0.1x increments. Negative = scroll backward.</div>
                     </div>
                     
                     <div>

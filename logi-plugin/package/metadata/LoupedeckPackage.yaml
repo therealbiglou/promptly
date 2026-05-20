@@ -1,0 +1,12 @@
+type: plugin4
+name: Promptly
+version: 1.0.0
+displayName: Promptly
+description: Control the Promptly teleprompter — play/pause, navigate chapters, shuttle scroll speed (with reverse), and toggle modes.
+minimumLoupedeckVersion: 6.1
+
+pluginType: remote
+pluginRuntime: nodejs
+entryPoint: index.mjs
+
+pluginCapabilities:

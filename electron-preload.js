@@ -38,6 +38,11 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.send('update-presenter-countdown', value);
   },
 
+  // Push current Promptly state to the Logi plugin clients (via main process)
+  pushPluginState: (state) => {
+    ipcRenderer.send('plugin-state-push', state);
+  },
+
   // For the presenter window: listen for countdown updates
   onPresenterCountdownUpdate: (callback) => {
     const subscription = (event, value) => callback(value);

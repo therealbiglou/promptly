@@ -1,0 +1,30 @@
+{
+  "name": "promptly-logi-plugin",
+  "version": "1.0.0",
+  "description": "Logi MX Creative Console plugin for Promptly teleprompter",
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "scripts": {
+    "build": "tsup",
+    "watch": "tsup --watch",
+    "link": "logitoolkit link",
+    "unlink": "logitoolkit unlink",
+    "typecheck": "tsc --noEmit"
+  },
+  "author": "Brian Lewis",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "@logitech/plugin-sdk": "0.1.1",
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@logitech/plugin-toolkit": "0.1.1",
+    "@types/node": "^22.18.8",
+    "@types/ws": "^8.18.1",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.3"
+  }
+}
