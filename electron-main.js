@@ -1663,16 +1663,28 @@ function setLogiStatus(next) {
   }
 }
 
+function detectLogiOptionsPlus() {
+  // Several candidate paths — Options+ installs vary by version and whether
+  // admin or per-user. The plugins folder under LogiPluginService may not
+  // exist yet on a fresh Options+ install, so we don't rely on that alone.
+  const candidates = [
+    process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Logi'),
+    process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Logitech'),
+    process.env.PROGRAMFILES && path.join(process.env.PROGRAMFILES, 'LogiOptionsPlus'),
+    process.env['PROGRAMFILES(X86)'] && path.join(process.env['PROGRAMFILES(X86)'], 'LogiOptionsPlus'),
+    process.env.PROGRAMFILES && path.join(process.env.PROGRAMFILES, 'Logi', 'LogiOptionsPlus'),
+    process.env.PROGRAMFILES && path.join(process.env.PROGRAMFILES, 'Logitech', 'LogiOptionsPlus')
+  ].filter(Boolean);
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return true;
+  }
+  return false;
+}
+
 async function ensureLogiPluginInstalled({ force = false } = {}) {
   const localAppData = process.env.LOCALAPPDATA;
   if (!localAppData) {
-    setLogiStatus({ status: 'not-detected' });
-    return;
-  }
-  const serviceRoot = path.join(localAppData, 'Logi', 'LogiPluginService');
-  if (!fs.existsSync(serviceRoot)) {
-    console.log('[logi-plugin] Logi Plugin Service not installed at', serviceRoot);
-    setLogiStatus({ status: 'not-detected' });
+    setLogiStatus({ status: 'error', error: 'LOCALAPPDATA env var missing' });
     return;
   }
 
@@ -1683,7 +1695,9 @@ async function ensureLogiPluginInstalled({ force = false } = {}) {
     return;
   }
 
+  const serviceRoot = path.join(localAppData, 'Logi', 'LogiPluginService');
   const target = path.join(serviceRoot, 'plugins', manifest.name);
+  const optionsPlusDetected = detectLogiOptionsPlus();
 
   // Respect an active dev symlink: our install routine writes a regular
   // directory (via fs.cp), so any symlink/junction at the target must be a
@@ -1702,22 +1716,23 @@ async function ensureLogiPluginInstalled({ force = false } = {}) {
   if (!force) {
     const installed = readManifestAt(target);
     if (installed && installed.version === manifest.version) {
-      setLogiStatus({ status: 'installed', version: manifest.version });
+      setLogiStatus({ status: 'installed', version: manifest.version, optionsPlusDetected });
       return;
     }
   }
 
-  // Install / reinstall.
+  // Install / reinstall — create LogiPluginService\plugins\ as needed.
   setLogiStatus({ status: 'installing' });
   try {
+    await fs.promises.mkdir(path.dirname(target), { recursive: true });
     if (fs.existsSync(target)) {
       await fs.promises.rm(target, { recursive: true, force: true });
     }
     await fs.promises.cp(getBundledLogiPluginDir(), target, { recursive: true });
     // Tell a running Logi Plugin Service to reload the plugin without a service restart.
     spawn('cmd.exe', ['/c', 'start', '""', `loupedeck://plugin/${manifest.name}/reload`], { detached: true, windowsHide: true, stdio: 'ignore' });
-    setLogiStatus({ status: 'installed', version: manifest.version });
-    console.log(`[logi-plugin] installed ${manifest.name} v${manifest.version} -> ${target}`);
+    setLogiStatus({ status: 'installed', version: manifest.version, optionsPlusDetected });
+    console.log(`[logi-plugin] installed ${manifest.name} v${manifest.version} -> ${target} (Options+ detected: ${optionsPlusDetected})`);
   } catch (err) {
     console.error('[logi-plugin] install failed:', err);
     setLogiStatus({ status: 'error', error: err.message });

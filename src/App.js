@@ -5380,8 +5380,59 @@ export default function App() {
             )}
 
             {showRemote && (
-              <div className="p-4 bg-gray-700 rounded-b-lg rounded-tr-lg mb-4 overflow-y-auto max-h-[60vh]">
-                <h3 className="text-lg font-bold mb-4 text-purple-400">Remote Control</h3>
+              <div className="p-4 bg-gray-700 rounded-b-lg rounded-tr-lg mb-4 overflow-y-auto max-h-[60vh] space-y-4">
+                <h3 className="text-lg font-bold text-purple-400">Remote Control</h3>
+
+                {/* Logi MX Creative Console plugin status — always visible */}
+                <div className="p-3 bg-gray-800 rounded-lg">
+                  <div className="text-xs text-gray-400 mb-1">Logi MX Creative Console plugin</div>
+                  {logiPluginStatus.status === 'pending' && (
+                    <div className="text-xs text-gray-500">Checking…</div>
+                  )}
+                  {logiPluginStatus.status === 'installing' && (
+                    <div className="text-xs text-blue-400">Installing…</div>
+                  )}
+                  {logiPluginStatus.status === 'installed' && (
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm">
+                        <span className="text-green-400">● Installed</span>
+                        {logiPluginStatus.version ? <span className="text-gray-400"> (v{logiPluginStatus.version})</span> : null}
+                        {logiPluginStatus.optionsPlusDetected === false && (
+                          <div className="text-xs text-yellow-300 mt-1">Logi Options+ not detected — plugin will activate once you install it.</div>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => window.electron?.reinstallLogiPlugin?.()}
+                        className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded shrink-0"
+                      >
+                        Reinstall
+                      </button>
+                    </div>
+                  )}
+                  {logiPluginStatus.status === 'dev-linked' && (
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm text-yellow-400">● Linked from source (dev mode){logiPluginStatus.version ? ` (v${logiPluginStatus.version})` : ''}</div>
+                      <button
+                        onClick={() => window.electron?.reinstallLogiPlugin?.()}
+                        className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded shrink-0"
+                        title="Replace the dev junction with the bundled copy"
+                      >
+                        Install bundled
+                      </button>
+                    </div>
+                  )}
+                  {logiPluginStatus.status === 'error' && (
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-xs text-red-400 flex-1">Install failed: {logiPluginStatus.error || 'unknown error'}</div>
+                      <button
+                        onClick={() => window.electron?.reinstallLogiPlugin?.()}
+                        className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded shrink-0"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  )}
+                </div>
 
                 {!remoteServerActive ? (
                   <div className="space-y-4">
@@ -5450,54 +5501,6 @@ export default function App() {
 
                     <div className="text-xs text-gray-400 text-center">
                       Control buttons: Play/Pause, Speed Up/Down, Previous/Next Chapter, Reset
-                    </div>
-
-                    {/* Logi MX Creative Console plugin status */}
-                    <div className="p-3 bg-gray-800 rounded-lg">
-                      <div className="text-xs text-gray-400 mb-1">Logi MX Creative Console plugin</div>
-                      {logiPluginStatus.status === 'pending' && (
-                        <div className="text-xs text-gray-500">Checking…</div>
-                      )}
-                      {logiPluginStatus.status === 'installing' && (
-                        <div className="text-xs text-blue-400">Installing…</div>
-                      )}
-                      {logiPluginStatus.status === 'installed' && (
-                        <div className="flex items-center justify-between">
-                          <div className="text-sm text-green-400">● Installed{logiPluginStatus.version ? ` (v${logiPluginStatus.version})` : ''}</div>
-                          <button
-                            onClick={() => window.electron?.reinstallLogiPlugin?.()}
-                            className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded"
-                          >
-                            Reinstall
-                          </button>
-                        </div>
-                      )}
-                      {logiPluginStatus.status === 'dev-linked' && (
-                        <div className="flex items-center justify-between">
-                          <div className="text-sm text-yellow-400">● Linked from source (dev mode){logiPluginStatus.version ? ` (v${logiPluginStatus.version})` : ''}</div>
-                          <button
-                            onClick={() => window.electron?.reinstallLogiPlugin?.()}
-                            className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded"
-                            title="Replace the dev junction with the bundled copy"
-                          >
-                            Install bundled
-                          </button>
-                        </div>
-                      )}
-                      {logiPluginStatus.status === 'not-detected' && (
-                        <div className="text-xs text-gray-400">Logi Options+ not detected. Install Logi Options+ to use the MX Creative Console with Promptly.</div>
-                      )}
-                      {logiPluginStatus.status === 'error' && (
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="text-xs text-red-400 flex-1">Install failed: {logiPluginStatus.error || 'unknown error'}</div>
-                          <button
-                            onClick={() => window.electron?.reinstallLogiPlugin?.()}
-                            className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded"
-                          >
-                            Retry
-                          </button>
-                        </div>
-                      )}
                     </div>
 
                     <button
