@@ -124,8 +124,6 @@
 
     #timer-overlay {
       position: fixed;
-      top: 16px;
-      left: 16px;
       background: rgba(0, 0, 0, 0.7);
       padding: 12px 16px;
       border-radius: 8px;
@@ -133,6 +131,19 @@
       z-index: 40;
       color: white;
     }
+    #timer-overlay.corner-top-left { top: 16px; left: 16px; }
+    #timer-overlay.corner-top-right { top: 16px; right: 16px; }
+    #timer-overlay.corner-bottom-left { bottom: 16px; left: 16px; }
+    #timer-overlay.corner-bottom-right { bottom: 16px; right: 16px; }
+    #timer-overlay.mode-hidden { display: none; }
+    /* In speed-only mode, hide everything except the speed indicator block */
+    #timer-overlay.mode-speed .timer-flex,
+    #timer-overlay.mode-speed .progress-bar {
+      display: none;
+    }
+    #timer-overlay.mode-speed { padding: 18px 26px; }
+    #timer-overlay.mode-speed .speed-indicator { margin-top: 0; }
+    #timer-overlay.mode-speed .speed-value { font-size: 56px; }
     
     .timer-flex {
       display: flex;
@@ -189,38 +200,19 @@
       color: #d1d5db;
     }
     .speed-indicator .speed-label {
-      font-size: 12px;
+      font-size: 11px;
       color: #9ca3af;
       letter-spacing: 0.5px;
       text-transform: uppercase;
     }
     .speed-indicator .speed-value {
-      font-size: 44px;
+      font-size: 26px;
       font-family: monospace;
-      font-weight: 800;
+      font-weight: 700;
       color: #fbbf24;
       line-height: 1;
       display: block;
-      margin-top: 4px;
-    }
-
-    #speed-popup {
-      position: fixed;
-      bottom: 24px;
-      right: 24px;
-      background: rgba(0, 0, 0, 0.78);
-      border: 1px solid #4b5563;
-      border-radius: 12px;
-      padding: 14px 22px;
-      color: #fbbf24;
-      font-family: monospace;
-      font-weight: 800;
-      font-size: 56px;
-      line-height: 1;
-      z-index: 55;
-      display: none;
-      pointer-events: none;
-      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
+      margin-top: 2px;
     }
 	
 	#drag-handle {
@@ -385,8 +377,6 @@
       </div>
     </div>
 
-    <!-- Ephemeral speed-change popup, shown when the timer is hidden -->
-    <div id="speed-popup"></div>
 
     <div id="fullscreen-hint">
       Press F11 or move mouse to show controls
@@ -799,19 +789,6 @@
 		});
 	  }
 
-	  // Ephemeral speed-change popup (shown when the timer is hidden)
-	  if (window.electron && window.electron.onPresenterSpeedPopup) {
-		window.electron.onPresenterSpeedPopup((value) => {
-		  const popup = document.getElementById('speed-popup');
-		  if (!popup) return;
-		  if (value === null || value === undefined) {
-			popup.style.display = 'none';
-		  } else {
-			popup.textContent = Number(value).toFixed(1) + 'x';
-			popup.style.display = 'block';
-		  }
-		});
-	  }
 
 	  // Listen for generic messages (like jump to chapter)
 	  if (window.electron && window.electron.onPresenterMessage) {
@@ -885,7 +862,18 @@
         crosshairV.style.width = thick + 'px';
         crosshairV.style.height = len + 'px';
       }
-      
+
+      // Apply timer overlay mode + corner
+      const timerOverlay = document.getElementById('timer-overlay');
+      if (timerOverlay) {
+        const mode = data.timerDisplayMode || 'full';
+        const corner = data.timerCorner || 'top-left';
+        timerOverlay.classList.remove('mode-full', 'mode-speed', 'mode-hidden');
+        timerOverlay.classList.add('mode-' + mode);
+        timerOverlay.classList.remove('corner-top-left', 'corner-top-right', 'corner-bottom-left', 'corner-bottom-right');
+        timerOverlay.classList.add('corner-' + corner);
+      }
+
       // Render chapters
       const scrollEl = document.getElementById('presenter-scroll');
       const transform = `scaleX(${data.flipHorizontal ? -1 : 1}) scaleY(${data.flipVertical ? -1 : 1})`;
@@ -952,11 +940,8 @@
       scrollEl.style.paddingBottom = `${paddingBottomPx}px`;
       scrollEl.style.transform = transform;
 
-      // Show/hide timer overlay based on setting
-      const timerOverlay = document.getElementById('timer-overlay');
-      if (timerOverlay) {
-        timerOverlay.style.display = data.showTimerSpeed === false ? 'none' : 'block';
-      }
+      // Timer overlay visibility/positioning handled by mode-* / corner-* classes
+      // applied earlier in this function.
 
       // Update progress display
       updateProgressDisplay(data.scrollProgress, data.scrollSpeed, data.elapsedTime, data.estimatedDuration);

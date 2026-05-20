@@ -374,11 +374,6 @@ ipcMain.on('update-presenter-countdown', (event, value) => {
   }
 });
 
-ipcMain.on('update-presenter-speed-popup', (event, value) => {
-  if (presenterWindow && !presenterWindow.isDestroyed()) {
-    presenterWindow.webContents.send('presenter-speed-popup', value);
-  }
-});
 
 ipcMain.on('presenter-message', (event, message) => {
   if (presenterWindow && !presenterWindow.isDestroyed()) {
@@ -1122,12 +1117,13 @@ function startRemoteServer() {
               }
             }
             if (tBtn && tState) {
-              if (settings.showTimerSpeed) {
-                tBtn.classList.add('on');
-                tState.textContent = 'Shown';
-              } else {
+              const mode = settings.timerDisplayMode || 'full';
+              if (mode === 'hidden') {
                 tBtn.classList.remove('on');
-                tState.textContent = 'Hidden';
+                tState.textContent = 'Off';
+              } else {
+                tBtn.classList.add('on');
+                tState.textContent = mode === 'speed' ? 'Speed' : 'Full';
               }
             }
           }

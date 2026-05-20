@@ -47,19 +47,6 @@ contextBridge.exposeInMainWorld('electron', {
     };
   },
 
-  // Send ephemeral speed-change popup value (number or null) to the presenter window
-  updatePresenterSpeedPopup: (value) => {
-    ipcRenderer.send('update-presenter-speed-popup', value);
-  },
-
-  // For the presenter window: listen for speed popup updates
-  onPresenterSpeedPopup: (callback) => {
-    const subscription = (event, value) => callback(value);
-    ipcRenderer.on('presenter-speed-popup', subscription);
-    return () => {
-      ipcRenderer.removeListener('presenter-speed-popup', subscription);
-    };
-  },
 
   // Send generic message to presenter window
   sendPresenterMessage: (message) => {

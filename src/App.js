@@ -79,6 +79,7 @@ export default function App() {
   const [remoteServerUrl, setRemoteServerUrl] = useState('');
   const [remoteTunnelUrl, setRemoteTunnelUrl] = useState(''); // Cloudflare cross-network URL
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
+  const [qrSource, setQrSource] = useState('auto'); // 'auto' = prefer tunnel; 'local' = LAN; 'internet' = tunnel-only
   const [updateInfo, setUpdateInfo] = useState(null); // { version, releaseNotes } when an update is available
   const [updateProgress, setUpdateProgress] = useState(null); // 0-100 while downloading
   const [updateDownloaded, setUpdateDownloaded] = useState(false);
@@ -165,7 +166,10 @@ export default function App() {
   const [crosshairThickness, setCrosshairThickness] = useState(1);
   const [countdownDuration, setCountdownDuration] = useState(0); // seconds; 0 = disabled
   const [countdownValue, setCountdownValue] = useState(null); // current count, or null when not active
-  const [showTimerSpeed, setShowTimerSpeed] = useState(true); // Show/hide timer and speed in presenter
+  // Timer display mode in the presenter: 'full' (timer + progress + speed), 'speed' (just speed), 'hidden'
+  const [timerDisplayMode, setTimerDisplayMode] = useState('full');
+  // Which corner the timer/speed overlay sits in
+  const [timerCorner, setTimerCorner] = useState('top-left');
   const [leadInMargin, setLeadInMargin] = useState(40);
   // leadOutMargin removed - bottom padding is always half height to allow last line to reach crosshair
   const [chapterSpacing, setChapterSpacing] = useState(2);
@@ -2501,6 +2505,13 @@ export default function App() {
         if (settings.crosshairLength !== undefined) setCrosshairLength(settings.crosshairLength);
         if (settings.crosshairThickness !== undefined) setCrosshairThickness(settings.crosshairThickness);
         if (settings.countdownDuration !== undefined) setCountdownDuration(settings.countdownDuration);
+        if (settings.timerDisplayMode !== undefined) {
+          setTimerDisplayMode(settings.timerDisplayMode);
+        } else if (settings.showTimerSpeed !== undefined) {
+          // Migrate legacy boolean setting
+          setTimerDisplayMode(settings.showTimerSpeed ? 'full' : 'hidden');
+        }
+        if (settings.timerCorner !== undefined) setTimerCorner(settings.timerCorner);
         if (settings.leadInMargin !== undefined) setLeadInMargin(settings.leadInMargin);
         if (settings.chapterSpacing !== undefined) setChapterSpacing(settings.chapterSpacing);
         if (settings.wordsPerMinute !== undefined) setWordsPerMinute(settings.wordsPerMinute);
@@ -2539,6 +2550,8 @@ export default function App() {
       crosshairLength,
       crosshairThickness,
       countdownDuration,
+      timerDisplayMode,
+      timerCorner,
       leadInMargin,
       chapterSpacing,
       wordsPerMinute,
@@ -2559,6 +2572,8 @@ export default function App() {
     crosshairLength,
     crosshairThickness,
     countdownDuration,
+    timerDisplayMode,
+    timerCorner,
     leadInMargin,
     chapterSpacing,
     wordsPerMinute,
@@ -3602,7 +3617,7 @@ export default function App() {
             }
             break;
           case 'toggle-timer-speed':
-            setShowTimerSpeed(v => !v);
+            setTimerDisplayMode(prev => prev === 'full' ? 'speed' : prev === 'speed' ? 'hidden' : 'full');
             break;
           case 'reset':
             cancelCountdown();
@@ -3626,22 +3641,27 @@ export default function App() {
     };
   }, []);
 
-  // Generate QR code — prefer the cross-network tunnel URL so phones on a different
-  // network can scan and reach the server. Fall back to the LAN URL.
+  // Generate QR code based on the user's QR source preference.
+  // 'auto' prefers the cross-network tunnel URL, falling back to LAN.
+  // 'local' always uses the LAN URL.
+  // 'internet' always uses the tunnel URL (empty if not ready).
   useEffect(() => {
-    const preferred = remoteTunnelUrl || remoteServerUrl;
+    let preferred = '';
+    if (qrSource === 'local') {
+      preferred = remoteServerUrl;
+    } else if (qrSource === 'internet') {
+      preferred = remoteTunnelUrl;
+    } else {
+      preferred = remoteTunnelUrl || remoteServerUrl;
+    }
     if (preferred) {
       QRCode.toDataURL(preferred, { width: 256, margin: 2 })
-        .then(url => {
-          setQrCodeDataUrl(url);
-        })
-        .catch(err => {
-          console.error('Error generating QR code:', err);
-        });
+        .then(url => setQrCodeDataUrl(url))
+        .catch(err => console.error('Error generating QR code:', err));
     } else {
       setQrCodeDataUrl('');
     }
-  }, [remoteServerUrl, remoteTunnelUrl]);
+  }, [remoteServerUrl, remoteTunnelUrl, qrSource]);
 
   // Auto-updater subscriptions
   useEffect(() => {
@@ -3676,14 +3696,14 @@ export default function App() {
       return {
         speedIncrement: speedIncrement,
         countdownDuration: countdownDuration,
-        showTimerSpeed: showTimerSpeed
+        timerDisplayMode: timerDisplayMode
       };
     };
 
     return () => {
       delete window.getRemoteSettings;
     };
-  }, [speedIncrement, countdownDuration, showTimerSpeed]);
+  }, [speedIncrement, countdownDuration, timerDisplayMode]);
 
   // Expose chapters to remote control interface
   useEffect(() => {
@@ -3725,26 +3745,6 @@ export default function App() {
     return () => { delete window.getRemoteState; };
   }, [currentChapterIndex, activeScrollSpeed, isPlaying]);
 
-  // Show an ephemeral speed-change popup on the presenter when the timer overlay is hidden.
-  const speedPopupTimeoutRef = useRef(null);
-  const lastPopupSpeedRef = useRef(activeScrollSpeed);
-  useEffect(() => {
-    if (activeScrollSpeed === lastPopupSpeedRef.current) return;
-    lastPopupSpeedRef.current = activeScrollSpeed;
-    if (showTimerSpeed) return; // timer overlay already shows the speed
-    if (!window.electron?.updatePresenterSpeedPopup) return;
-    window.electron.updatePresenterSpeedPopup(activeScrollSpeed);
-    if (speedPopupTimeoutRef.current) clearTimeout(speedPopupTimeoutRef.current);
-    speedPopupTimeoutRef.current = setTimeout(() => {
-      if (window.electron?.updatePresenterSpeedPopup) {
-        window.electron.updatePresenterSpeedPopup(null);
-      }
-      speedPopupTimeoutRef.current = null;
-    }, 1500);
-  }, [activeScrollSpeed, showTimerSpeed]);
-  useEffect(() => () => {
-    if (speedPopupTimeoutRef.current) clearTimeout(speedPopupTimeoutRef.current);
-  }, []);
 
   // Note: previewScrollRef is now updated directly in the animation loop (line 1048-1050)
   // for smooth scrolling without jitter
@@ -3791,7 +3791,8 @@ export default function App() {
 			crosshairColor,
 			crosshairLength,
 			crosshairThickness,
-			showTimerSpeed,
+			timerDisplayMode,
+			timerCorner,
 			presenterWidth: presenterWindowDimensions.width,
 			presenterHeight: presenterWindowDimensions.height,
 			scrollProgress: scrollProgress,
@@ -3900,7 +3901,7 @@ export default function App() {
     updatePresenterContent();
   }, [presenterWindow, currentScript, fontSize, fontColor, bgColor, lineHeight,
       horizontalMargin, leadInMargin, chapterSpacing, crosshairColor, crosshairLength,
-      crosshairThickness, showTimerSpeed,
+      crosshairThickness, timerDisplayMode, timerCorner,
       scrollProgress, scrollSpeed, activeScrollSpeed, elapsedTime, estimatedDuration]);
 
   // Update timer in presenter window
@@ -5057,16 +5058,36 @@ export default function App() {
                       <div className="text-xs text-gray-400 mt-1">↑↓ arrow key step size</div>
                     </div>
                   </div>
-                  <div className="mt-3">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={showTimerSpeed}
-                        onChange={(e) => setShowTimerSpeed(e.target.checked)}
-                        className="w-4 h-4 rounded"
-                      />
-                      <span className="text-sm">Show timer & speed in presenter window</span>
-                    </label>
+                  <div className="mt-3 grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm mb-2">Presenter timer overlay</label>
+                      <div className="inline-flex rounded-lg overflow-hidden border border-gray-600 text-xs">
+                        {['full', 'speed', 'hidden'].map(opt => (
+                          <button
+                            key={opt}
+                            type="button"
+                            onClick={() => setTimerDisplayMode(opt)}
+                            className={`px-3 py-2 ${timerDisplayMode === opt ? 'bg-blue-600 text-white' : 'bg-gray-800 hover:bg-gray-700'}`}
+                          >
+                            {opt === 'full' ? 'Full' : opt === 'speed' ? 'Speed only' : 'Hidden'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm mb-2">Overlay corner</label>
+                      <select
+                        value={timerCorner}
+                        onChange={(e) => setTimerCorner(e.target.value)}
+                        disabled={timerDisplayMode === 'hidden'}
+                        className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-sm disabled:opacity-50"
+                      >
+                        <option value="top-left">Top left</option>
+                        <option value="top-right">Top right</option>
+                        <option value="bottom-left">Bottom left</option>
+                        <option value="bottom-right">Bottom right</option>
+                      </select>
+                    </div>
                   </div>
                   <div className="mt-3">
                     <label className="block text-sm mb-2">
@@ -5329,12 +5350,38 @@ export default function App() {
                       </div>
                     </div>
 
-                    {qrCodeDataUrl && (
+                    <div>
+                      <div className="text-xs text-gray-400 mb-1">QR points to</div>
+                      <div className="inline-flex rounded-lg overflow-hidden border border-gray-600 text-xs">
+                        {[
+                          { v: 'auto', label: 'Auto' },
+                          { v: 'internet', label: 'Internet' },
+                          { v: 'local', label: 'Local' }
+                        ].map(opt => (
+                          <button
+                            key={opt.v}
+                            type="button"
+                            onClick={() => setQrSource(opt.v)}
+                            className={`px-3 py-1.5 ${qrSource === opt.v ? 'bg-purple-600 text-white' : 'bg-gray-800 hover:bg-gray-700'}`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {qrCodeDataUrl ? (
                       <div className="bg-white p-4 rounded-lg flex flex-col items-center justify-center">
                         <img src={qrCodeDataUrl} alt="QR Code" className="w-64 h-64" />
                         <div className="text-xs text-gray-700 mt-2">
-                          {remoteTunnelUrl ? 'QR points to the internet URL' : 'QR points to local URL'}
+                          {qrSource === 'local' ? 'QR points to local URL'
+                            : qrSource === 'internet' ? 'QR points to the internet URL'
+                            : remoteTunnelUrl ? 'QR points to the internet URL (auto)' : 'QR points to local URL (auto)'}
                         </div>
+                      </div>
+                    ) : (
+                      <div className="bg-gray-900 p-4 rounded-lg text-center text-xs text-gray-400">
+                        {qrSource === 'internet' ? 'Waiting for Cloudflare tunnel…' : 'No URL available'}
                       </div>
                     )}
 
@@ -5605,17 +5652,19 @@ export default function App() {
             </button>
 
             <button
-              onClick={() => setShowTimerSpeed(v => !v)}
+              onClick={() => setTimerDisplayMode(prev => prev === 'full' ? 'speed' : prev === 'speed' ? 'hidden' : 'full')}
               className={`p-2 rounded-lg ${
-                showTimerSpeed
+                timerDisplayMode !== 'hidden'
                   ? 'bg-blue-500 hover:bg-blue-600 ring-2 ring-blue-300'
                   : 'bg-gray-700 hover:bg-gray-600'
               }`}
-              title={showTimerSpeed
-                ? 'Timer & speed shown in presenter — click to hide'
-                : 'Timer & speed hidden — click to show in presenter'}
+              title={
+                timerDisplayMode === 'full' ? 'Presenter: full timer — click for speed-only'
+                  : timerDisplayMode === 'speed' ? 'Presenter: speed only — click to hide'
+                  : 'Presenter: hidden — click to show full timer'
+              }
             >
-              {showTimerSpeed ? <Eye size={20} /> : <EyeOff size={20} />}
+              {timerDisplayMode === 'hidden' ? <EyeOff size={20} /> : <Eye size={20} />}
             </button>
             </div>
           </div>
