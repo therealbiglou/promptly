@@ -80,6 +80,7 @@ export default function App() {
   const [remoteTunnelUrl, setRemoteTunnelUrl] = useState(''); // Cloudflare cross-network URL
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
   const [qrSource, setQrSource] = useState('auto'); // 'auto' = prefer tunnel; 'local' = LAN; 'internet' = tunnel-only
+  const [logiPluginStatus, setLogiPluginStatus] = useState({ status: 'pending' });
   const [updateInfo, setUpdateInfo] = useState(null); // { version, releaseNotes } when an update is available
   const [updateProgress, setUpdateProgress] = useState(null); // 0-100 while downloading
   const [updateDownloaded, setUpdateDownloaded] = useState(false);
@@ -3786,6 +3787,15 @@ export default function App() {
     return () => { delete window.getRemoteState; };
   }, [currentChapterIndex, activeScrollSpeed, isPlaying]);
 
+  // Logi plugin install status (set by electron-main on launch and on reinstall)
+  useEffect(() => {
+    if (!window.electron?.onLogiPluginStatus) return;
+    let cancelled = false;
+    window.electron.getLogiPluginStatus?.().then(s => { if (!cancelled && s) setLogiPluginStatus(s); }).catch(() => {});
+    const unsub = window.electron.onLogiPluginStatus(s => setLogiPluginStatus(s));
+    return () => { cancelled = true; if (unsub) unsub(); };
+  }, []);
+
   // Push state to any connected Logi plugin clients (pushed, not polled).
   useEffect(() => {
     if (!window.electron?.pushPluginState) return;
@@ -5440,6 +5450,54 @@ export default function App() {
 
                     <div className="text-xs text-gray-400 text-center">
                       Control buttons: Play/Pause, Speed Up/Down, Previous/Next Chapter, Reset
+                    </div>
+
+                    {/* Logi MX Creative Console plugin status */}
+                    <div className="p-3 bg-gray-800 rounded-lg">
+                      <div className="text-xs text-gray-400 mb-1">Logi MX Creative Console plugin</div>
+                      {logiPluginStatus.status === 'pending' && (
+                        <div className="text-xs text-gray-500">Checking…</div>
+                      )}
+                      {logiPluginStatus.status === 'installing' && (
+                        <div className="text-xs text-blue-400">Installing…</div>
+                      )}
+                      {logiPluginStatus.status === 'installed' && (
+                        <div className="flex items-center justify-between">
+                          <div className="text-sm text-green-400">● Installed{logiPluginStatus.version ? ` (v${logiPluginStatus.version})` : ''}</div>
+                          <button
+                            onClick={() => window.electron?.reinstallLogiPlugin?.()}
+                            className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded"
+                          >
+                            Reinstall
+                          </button>
+                        </div>
+                      )}
+                      {logiPluginStatus.status === 'dev-linked' && (
+                        <div className="flex items-center justify-between">
+                          <div className="text-sm text-yellow-400">● Linked from source (dev mode){logiPluginStatus.version ? ` (v${logiPluginStatus.version})` : ''}</div>
+                          <button
+                            onClick={() => window.electron?.reinstallLogiPlugin?.()}
+                            className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded"
+                            title="Replace the dev junction with the bundled copy"
+                          >
+                            Install bundled
+                          </button>
+                        </div>
+                      )}
+                      {logiPluginStatus.status === 'not-detected' && (
+                        <div className="text-xs text-gray-400">Logi Options+ not detected. Install Logi Options+ to use the MX Creative Console with Promptly.</div>
+                      )}
+                      {logiPluginStatus.status === 'error' && (
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-xs text-red-400 flex-1">Install failed: {logiPluginStatus.error || 'unknown error'}</div>
+                          <button
+                            onClick={() => window.electron?.reinstallLogiPlugin?.()}
+                            className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded"
+                          >
+                            Retry
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     <button

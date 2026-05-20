@@ -1622,6 +1622,111 @@ app.whenReady().then(() => {
   if (!isDev) {
     setupAutoUpdater();
   }
+
+  // Auto-install the bundled Logi Plugin Service plugin (if Options+ is present).
+  // Delayed so it doesn't compete with the main-window load.
+  setTimeout(() => { ensureLogiPluginInstalled().catch(err => console.error('[logi-plugin] install error:', err)); }, 4000);
+});
+
+// ============================================================================
+// Logi Plugin Service: install the bundled plugin into the user's
+// %LOCALAPPDATA%\Logi\LogiPluginService\plugins\<name>\ directory so the
+// MX Creative Console works out-of-the-box after a Promptly install/update.
+// ============================================================================
+let logiPluginStatus = { status: 'pending' };
+
+function getBundledLogiPluginDir() {
+  return isDev
+    ? path.join(__dirname, 'logi-plugin', 'dist')
+    : path.join(process.resourcesPath, 'logi-plugin');
+}
+
+// After build, package contents land FLAT in dist/ (so the manifest is at
+// dist/metadata/, not dist/package/metadata/). Logi Plugin Service expects
+// the same flat layout.
+function readManifestAt(rootDir) {
+  const manifestPath = path.join(rootDir, 'metadata', 'LoupedeckPackage.yaml');
+  if (!fs.existsSync(manifestPath)) return null;
+  const text = fs.readFileSync(manifestPath, 'utf8');
+  const name = (text.match(/^\s*name:\s*(\S+)/m) || [])[1];
+  const version = (text.match(/^\s*version:\s*(\S+)/m) || [])[1];
+  return name && version ? { name, version } : null;
+}
+function readBundledManifest() {
+  return readManifestAt(getBundledLogiPluginDir());
+}
+
+function setLogiStatus(next) {
+  logiPluginStatus = next;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('logi-plugin-status', next);
+  }
+}
+
+async function ensureLogiPluginInstalled({ force = false } = {}) {
+  const localAppData = process.env.LOCALAPPDATA;
+  if (!localAppData) {
+    setLogiStatus({ status: 'not-detected' });
+    return;
+  }
+  const serviceRoot = path.join(localAppData, 'Logi', 'LogiPluginService');
+  if (!fs.existsSync(serviceRoot)) {
+    console.log('[logi-plugin] Logi Plugin Service not installed at', serviceRoot);
+    setLogiStatus({ status: 'not-detected' });
+    return;
+  }
+
+  const manifest = readBundledManifest();
+  if (!manifest) {
+    console.error('[logi-plugin] bundled manifest missing or unreadable at', getBundledLogiPluginDir());
+    setLogiStatus({ status: 'error', error: 'Bundled plugin manifest missing' });
+    return;
+  }
+
+  const target = path.join(serviceRoot, 'plugins', manifest.name);
+
+  // Respect an active dev symlink: our install routine writes a regular
+  // directory (via fs.cp), so any symlink/junction at the target must be a
+  // user-created `npm run link` we shouldn't clobber.
+  try {
+    const stat = fs.lstatSync(target);
+    if (stat.isSymbolicLink()) {
+      setLogiStatus({ status: 'dev-linked', version: manifest.version });
+      if (!force) return;
+    }
+  } catch {
+    // target doesn't exist — fine
+  }
+
+  // Version-match early return.
+  if (!force) {
+    const installed = readManifestAt(target);
+    if (installed && installed.version === manifest.version) {
+      setLogiStatus({ status: 'installed', version: manifest.version });
+      return;
+    }
+  }
+
+  // Install / reinstall.
+  setLogiStatus({ status: 'installing' });
+  try {
+    if (fs.existsSync(target)) {
+      await fs.promises.rm(target, { recursive: true, force: true });
+    }
+    await fs.promises.cp(getBundledLogiPluginDir(), target, { recursive: true });
+    // Tell a running Logi Plugin Service to reload the plugin without a service restart.
+    spawn('cmd.exe', ['/c', 'start', '""', `loupedeck://plugin/${manifest.name}/reload`], { detached: true, windowsHide: true, stdio: 'ignore' });
+    setLogiStatus({ status: 'installed', version: manifest.version });
+    console.log(`[logi-plugin] installed ${manifest.name} v${manifest.version} -> ${target}`);
+  } catch (err) {
+    console.error('[logi-plugin] install failed:', err);
+    setLogiStatus({ status: 'error', error: err.message });
+  }
+}
+
+ipcMain.handle('logi-plugin-status', () => logiPluginStatus);
+ipcMain.on('logi-plugin-reinstall', () => {
+  ensureLogiPluginInstalled({ force: true }).catch(err => console.error('[logi-plugin] reinstall error:', err));
 });
 
 function setupAutoUpdater() {

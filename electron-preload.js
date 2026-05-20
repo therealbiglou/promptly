@@ -43,6 +43,15 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.send('plugin-state-push', state);
   },
 
+  // Logi Plugin Service plugin install status
+  getLogiPluginStatus: () => ipcRenderer.invoke('logi-plugin-status'),
+  reinstallLogiPlugin: () => ipcRenderer.send('logi-plugin-reinstall'),
+  onLogiPluginStatus: (callback) => {
+    const subscription = (event, status) => callback(status);
+    ipcRenderer.on('logi-plugin-status', subscription);
+    return () => ipcRenderer.removeListener('logi-plugin-status', subscription);
+  },
+
   // For the presenter window: listen for countdown updates
   onPresenterCountdownUpdate: (callback) => {
     const subscription = (event, value) => callback(value);
