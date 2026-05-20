@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Play, Pause, Settings, FileText, Download, Upload, Edit2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronUp, ChevronDown, List, ListOrdered, Plus, GripVertical, Trash2, Maximize2, Eye, EyeOff, Monitor, Bold, Italic, Underline, Palette, AlertCircle, Timer, Zap, Scissors, Clock, Type, Droplet, Move, BookOpen, Target, Check, X, FileDown, ArrowUpDown, Crosshair } from 'lucide-react';
+import { Play, Pause, Settings, FileText, Download, Upload, Edit2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronUp, ChevronDown, List, ListOrdered, Plus, GripVertical, Trash2, Maximize2, Eye, EyeOff, Monitor, Bold, Italic, Underline, Palette, AlertCircle, Timer, Zap, Scissors, Clock, Type, Droplet, Move, BookOpen, Target, Check, X, FileDown, ArrowUpDown, Crosshair, Gauge } from 'lucide-react';
 import QRCode from 'qrcode';
 import { jsPDF } from 'jspdf';
 
@@ -5079,8 +5079,7 @@ export default function App() {
                       <select
                         value={timerCorner}
                         onChange={(e) => setTimerCorner(e.target.value)}
-                        disabled={timerDisplayMode === 'hidden'}
-                        className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-sm disabled:opacity-50"
+                        className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-sm"
                       >
                         <option value="top-left">Top left</option>
                         <option value="top-right">Top right</option>
@@ -5664,7 +5663,9 @@ export default function App() {
                   : 'Presenter: hidden — click to show full timer'
               }
             >
-              {timerDisplayMode === 'hidden' ? <EyeOff size={20} /> : <Eye size={20} />}
+              {timerDisplayMode === 'full' ? <Clock size={20} />
+                : timerDisplayMode === 'speed' ? <Gauge size={20} />
+                : <EyeOff size={20} />}
             </button>
             </div>
           </div>
