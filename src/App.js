@@ -1974,6 +1974,17 @@ export default function App() {
         scrollRef.current.scrollTop = scrollPosition;
       }
 
+      // Mirror to the visible operator preview (scaled). Without this, paths
+      // that only update scrollPosition state (jog, jump-to-chapter, reset)
+      // would leave the preview frozen while the presenter and hidden ref
+      // both scroll correctly.
+      if (previewScrollRef.current && scrollRef.current) {
+        const mainMaxScroll = scrollRef.current.scrollHeight - scrollRef.current.clientHeight;
+        const previewMaxScroll = previewScrollRef.current.scrollHeight - previewScrollRef.current.clientHeight;
+        const scrollPercentage = mainMaxScroll > 0 ? scrollPosition / mainMaxScroll : 0;
+        previewScrollRef.current.scrollTop = scrollPercentage * previewMaxScroll;
+      }
+
       // Push to presenter — include playing/speed so the presenter's local
       // animation can extrapolate between rebases. When paused/manual scroll
       // the presenter just holds at the position we send.
