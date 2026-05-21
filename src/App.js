@@ -1828,14 +1828,21 @@ export default function App() {
         previewScrollRef.current.scrollTop = scrollPercentage * previewMaxScroll;
       }
 
-      // Update presenter window scroll (no throttle for smooth scrolling)
+      // Update presenter window scroll (no throttle for smooth scrolling).
+      // Presenter runs its own local RAF and interpolates between rebases —
+      // we send playing + speed so it can extrapolate forward smoothly
+      // between IPC arrivals.
       if (presenterWindow) {
         if (presenterWindow.isElectron && window.electron && window.electron.updatePresenterScroll) {
-          // Calculate percentage for better sync across different window sizes
           const refEl = scrollRef.current;
           const maxScroll = refEl ? refEl.scrollHeight - refEl.clientHeight : 1;
           const percentage = maxScroll > 0 ? newPos / maxScroll : 0;
-          window.electron.updatePresenterScroll({ position: newPos, percentage });
+          window.electron.updatePresenterScroll({
+            position: newPos,
+            percentage,
+            playing: true,
+            speed: newActiveSpeed
+          });
         } else if (presenterWindowScrollRef.current) {
           presenterWindowScrollRef.current.scrollTop = newPos;
         }
@@ -1962,21 +1969,25 @@ export default function App() {
 
   // Sync scroll position - force scroll update on every render
   useEffect(() => {
-    // Use requestAnimationFrame to ensure DOM is ready
     requestAnimationFrame(() => {
       if (scrollRef.current) {
         scrollRef.current.scrollTop = scrollPosition;
       }
 
-      // Also update presenter window scroll position (even when paused)
+      // Push to presenter — include playing/speed so the presenter's local
+      // animation can extrapolate between rebases. When paused/manual scroll
+      // the presenter just holds at the position we send.
       if (presenterWindow && presenterWindow.isElectron && window.electron && window.electron.updatePresenterScroll) {
-        // Calculate scroll percentage from fullscreen view for better sync
         const maxScroll = scrollRef.current
           ? scrollRef.current.scrollHeight - scrollRef.current.clientHeight
           : 1;
-
         const percentage = maxScroll > 0 ? scrollPosition / maxScroll : 0;
-        window.electron.updatePresenterScroll({ position: scrollPosition, percentage });
+        window.electron.updatePresenterScroll({
+          position: scrollPosition,
+          percentage,
+          playing: isPlayingRef.current,
+          speed: isPlayingRef.current ? activeScrollSpeedRef.current : 0
+        });
       }
     });
   }, [scrollPosition, presenterWindow]);
@@ -3136,6 +3147,24 @@ export default function App() {
   useEffect(() => { manualScrollModeRef.current = manualScrollMode; }, [manualScrollMode]);
   useEffect(() => { scrollSpeedRef.current = scrollSpeed; }, [scrollSpeed]);
   useEffect(() => { activeScrollSpeedRef.current = activeScrollSpeed; }, [activeScrollSpeed]);
+
+  // When playback stops/starts, push a fresh animation state to the presenter
+  // so its local RAF loop knows to start/stop interpolating. Per-frame pushes
+  // only happen during play, so this useEffect covers the start/stop edges.
+  useEffect(() => {
+    if (!presenterWindow || presenterWindow.closed || !presenterWindow.isElectron) return;
+    if (!window.electron?.updatePresenterScroll) return;
+    const refEl = scrollRef.current;
+    const maxScroll = refEl ? refEl.scrollHeight - refEl.clientHeight : 1;
+    const pos = scrollPositionRef.current;
+    const percentage = maxScroll > 0 ? pos / maxScroll : 0;
+    window.electron.updatePresenterScroll({
+      position: pos,
+      percentage,
+      playing: isPlaying,
+      speed: isPlaying ? activeScrollSpeedRef.current : 0
+    });
+  }, [isPlaying, presenterWindow]);
 
   // Cleanup countdown timers on unmount
   useEffect(() => {

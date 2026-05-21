@@ -741,25 +741,47 @@
 	  }
 
 	  if (window.electron && window.electron.onPresenterScrollUpdate) {
-		// Coalesce incoming scroll updates through requestAnimationFrame so we
-		// apply at most one scrollTop write per browser frame. IPC messages
-		// from the operator can arrive in bursts (especially during shuttling
-		// when speed changes rapidly), and synchronous scrollTop writes per
-		// message produce visible jitter on the presenter.
-		let pendingScroll = null;
-		let scrollRafId = 0;
-		const flushScroll = () => {
-		  scrollRafId = 0;
-		  if (pendingScroll === null) return;
-		  const scrollEl = document.getElementById('presenter-scroll');
-		  if (scrollEl) scrollEl.scrollTop = pendingScroll;
-		  pendingScroll = null;
+		// Run the actual scroll locally via requestAnimationFrame. The operator
+		// only pushes rebases (speed + position at sample time); between
+		// rebases the presenter interpolates linearly using its own clock so
+		// scroll motion stays smooth regardless of IPC arrival timing.
+		const animState = {
+		  playing: false,
+		  speed: 0,
+		  basePosition: 0,
+		  baseTime: performance.now()
 		};
+
+		const tick = () => {
+		  const scrollEl = document.getElementById('presenter-scroll');
+		  if (scrollEl) {
+			let pos = animState.basePosition;
+			if (animState.playing && animState.speed !== 0) {
+			  // scrollSpeed is "pixels per frame at 60fps" in the operator's model.
+			  // Translate to time-based motion using the same 16.67 ms / frame anchor.
+			  const elapsedFrames = (performance.now() - animState.baseTime) / 16.67;
+			  pos = animState.basePosition + animState.speed * elapsedFrames;
+			}
+			scrollEl.scrollTop = pos;
+		  }
+		  requestAnimationFrame(tick);
+		};
+		requestAnimationFrame(tick);
+
 		window.electron.onPresenterScrollUpdate((data) => {
-		  if (typeof data === 'number') pendingScroll = data;
-		  else if (data && typeof data.position === 'number') pendingScroll = data.position;
-		  else return;
-		  if (!scrollRafId) scrollRafId = requestAnimationFrame(flushScroll);
+		  // Support legacy formats (number, or {position}) alongside the new
+		  // {playing, speed, position} envelope from current Promptly builds.
+		  if (typeof data === 'number') {
+			animState.playing = false;
+			animState.speed = 0;
+			animState.basePosition = data;
+			animState.baseTime = performance.now();
+		  } else if (data && typeof data === 'object') {
+			if (typeof data.position === 'number') animState.basePosition = data.position;
+			if (typeof data.speed === 'number') animState.speed = data.speed;
+			animState.playing = (typeof data.playing === 'boolean') ? data.playing : animState.playing;
+			animState.baseTime = performance.now();
+		  }
 		});
 	  }
 
