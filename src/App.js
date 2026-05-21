@@ -78,6 +78,7 @@ export default function App() {
   const [remoteServerActive, setRemoteServerActive] = useState(false);
   const [remoteServerUrl, setRemoteServerUrl] = useState('');
   const [remoteTunnelUrl, setRemoteTunnelUrl] = useState(''); // Cloudflare cross-network URL
+  const [tunnelActive, setTunnelActive] = useState(false);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
   const [qrSource, setQrSource] = useState('auto'); // 'auto' = prefer tunnel; 'local' = LAN; 'internet' = tunnel-only
   const [logiPluginStatus, setLogiPluginStatus] = useState({ status: 'pending' });
@@ -3559,17 +3560,29 @@ export default function App() {
     // Listen for the Cloudflare tunnel finishing setup (arrives after server-started)
     if (window.electron.onRemoteTunnelReady) {
       const unsubscribe = window.electron.onRemoteTunnelReady((data) => {
-        setRemoteTunnelUrl(data?.tunnelUrl || '');
+        const url = data?.tunnelUrl || '';
+        setRemoteTunnelUrl(url);
+        if (url) setTunnelActive(true);
       });
       unsubscribers.push(unsubscribe);
     }
 
-    // Listen for server stopped
+    // Listen for the tunnel being stopped (local server keeps running)
+    if (window.electron.onRemoteTunnelStopped) {
+      const unsubscribe = window.electron.onRemoteTunnelStopped(() => {
+        setTunnelActive(false);
+        setRemoteTunnelUrl('');
+      });
+      unsubscribers.push(unsubscribe);
+    }
+
+    // Listen for server stopped (legacy path; the new model never stops the local server)
     if (window.electron.onRemoteServerStopped) {
       const unsubscribe = window.electron.onRemoteServerStopped(() => {
         setRemoteServerActive(false);
         setRemoteServerUrl('');
         setRemoteTunnelUrl('');
+        setTunnelActive(false);
       });
       unsubscribers.push(unsubscribe);
     }
@@ -5434,83 +5447,69 @@ export default function App() {
                   )}
                 </div>
 
-                {!remoteServerActive ? (
-                  <div className="space-y-4">
-                    <p className="text-sm text-gray-300">
-                      Connect your phone to control the teleprompter remotely. Works on the same Wi‑Fi network OR across networks via the Cloudflare tunnel (a public URL is generated automatically).
-                    </p>
-                    <button
-                      onClick={startRemoteServer}
-                      className="w-full px-6 py-3 bg-purple-600 hover:bg-purple-700 rounded-lg font-semibold"
-                    >
-                      Start Remote Server
-                    </button>
+                <div className="space-y-4">
+                  <p className="text-sm text-gray-300">
+                    The local remote server runs while Promptly is open so the Logi plugin and any phone on the same Wi-Fi network can connect. Enable internet access to also reach Promptly from a different network via a Cloudflare tunnel.
+                  </p>
+
+                  <div className="p-4 bg-gray-800 rounded-lg">
+                    <div className="text-xs text-gray-400 mb-1">Local network (same Wi-Fi)</div>
+                    <div className="text-xs text-white font-mono bg-gray-900 p-2 rounded break-all mb-3">
+                      {remoteServerUrl || 'Starting…'}
+                    </div>
+
+                    <div className="text-xs text-gray-400 mb-1">
+                      Internet (cross-network) {tunnelActive ? (remoteTunnelUrl ? '' : '— starting…') : '— disabled'}
+                    </div>
+                    <div className="text-xs text-white font-mono bg-gray-900 p-2 rounded break-all">
+                      {tunnelActive ? (remoteTunnelUrl || 'Waiting for Cloudflare tunnel…') : 'Click "Enable Internet Access" to start a tunnel'}
+                    </div>
                   </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="p-4 bg-gray-800 rounded-lg">
-                      <div className="text-sm text-green-400 mb-2">● Server Active</div>
 
-                      <div className="text-xs text-gray-400 mb-1">
-                        Internet (cross-network) {remoteTunnelUrl ? '' : '— starting…'}
-                      </div>
-                      <div className="text-xs text-white font-mono bg-gray-900 p-2 rounded break-all mb-3">
-                        {remoteTunnelUrl || 'Waiting for Cloudflare tunnel…'}
-                      </div>
-
-                      <div className="text-xs text-gray-400 mb-1">Local network (same Wi‑Fi)</div>
-                      <div className="text-xs text-white font-mono bg-gray-900 p-2 rounded break-all">
-                        {remoteServerUrl}
-                      </div>
+                  <div>
+                    <div className="text-xs text-gray-400 mb-1">QR points to</div>
+                    <div className="inline-flex rounded-lg overflow-hidden border border-gray-600 text-xs">
+                      {[
+                        { v: 'auto', label: 'Auto' },
+                        { v: 'internet', label: 'Internet' },
+                        { v: 'local', label: 'Local' }
+                      ].map(opt => (
+                        <button
+                          key={opt.v}
+                          type="button"
+                          onClick={() => setQrSource(opt.v)}
+                          className={`px-3 py-1.5 ${qrSource === opt.v ? 'bg-purple-600 text-white' : 'bg-gray-800 hover:bg-gray-700'}`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
                     </div>
-
-                    <div>
-                      <div className="text-xs text-gray-400 mb-1">QR points to</div>
-                      <div className="inline-flex rounded-lg overflow-hidden border border-gray-600 text-xs">
-                        {[
-                          { v: 'auto', label: 'Auto' },
-                          { v: 'internet', label: 'Internet' },
-                          { v: 'local', label: 'Local' }
-                        ].map(opt => (
-                          <button
-                            key={opt.v}
-                            type="button"
-                            onClick={() => setQrSource(opt.v)}
-                            className={`px-3 py-1.5 ${qrSource === opt.v ? 'bg-purple-600 text-white' : 'bg-gray-800 hover:bg-gray-700'}`}
-                          >
-                            {opt.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {qrCodeDataUrl ? (
-                      <div className="bg-white p-4 rounded-lg flex flex-col items-center justify-center">
-                        <img src={qrCodeDataUrl} alt="QR Code" className="w-64 h-64" />
-                        <div className="text-xs text-gray-700 mt-2">
-                          {qrSource === 'local' ? 'QR points to local URL'
-                            : qrSource === 'internet' ? 'QR points to the internet URL'
-                            : remoteTunnelUrl ? 'QR points to the internet URL (auto)' : 'QR points to local URL (auto)'}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="bg-gray-900 p-4 rounded-lg text-center text-xs text-gray-400">
-                        {qrSource === 'internet' ? 'Waiting for Cloudflare tunnel…' : 'No URL available'}
-                      </div>
-                    )}
-
-                    <div className="text-xs text-gray-400 text-center">
-                      Control buttons: Play/Pause, Speed Up/Down, Previous/Next Chapter, Reset
-                    </div>
-
-                    <button
-                      onClick={stopRemoteServer}
-                      className="w-full px-6 py-3 bg-red-600 hover:bg-red-700 rounded-lg font-semibold"
-                    >
-                      Stop Remote Server
-                    </button>
                   </div>
-                )}
+
+                  {qrCodeDataUrl ? (
+                    <div className="bg-white p-4 rounded-lg flex flex-col items-center justify-center">
+                      <img src={qrCodeDataUrl} alt="QR Code" className="w-64 h-64" />
+                      <div className="text-xs text-gray-700 mt-2">
+                        {qrSource === 'local' ? 'QR points to local URL'
+                          : qrSource === 'internet' ? 'QR points to the internet URL'
+                          : remoteTunnelUrl ? 'QR points to the internet URL (auto)' : 'QR points to local URL (auto)'}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-gray-900 p-4 rounded-lg text-center text-xs text-gray-400">
+                      {qrSource === 'internet' && !tunnelActive ? 'Enable Internet Access to generate a public URL.'
+                        : qrSource === 'internet' ? 'Waiting for Cloudflare tunnel…'
+                        : 'No URL available'}
+                    </div>
+                  )}
+
+                  <button
+                    onClick={tunnelActive ? stopRemoteServer : startRemoteServer}
+                    className={`w-full px-6 py-3 rounded-lg font-semibold ${tunnelActive ? 'bg-red-600 hover:bg-red-700' : 'bg-purple-600 hover:bg-purple-700'}`}
+                  >
+                    {tunnelActive ? 'Disable Internet Access' : 'Enable Internet Access'}
+                  </button>
+                </div>
               </div>
             )}
 

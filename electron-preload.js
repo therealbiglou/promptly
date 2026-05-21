@@ -302,6 +302,15 @@ contextBridge.exposeInMainWorld('electron', {
     };
   },
 
+  // Listen for the Cloudflare tunnel being stopped (user clicked Stop).
+  onRemoteTunnelStopped: (callback) => {
+    const subscription = () => callback();
+    ipcRenderer.on('remote-tunnel-stopped', subscription);
+    return () => {
+      ipcRenderer.removeListener('remote-tunnel-stopped', subscription);
+    };
+  },
+
   // Auto-updater
   onUpdateAvailable: (callback) => {
     const subscription = (event, info) => callback(info);

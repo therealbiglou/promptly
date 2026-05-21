@@ -840,9 +840,20 @@ function getLocalIPAddress() {
   return 'localhost';
 }
 
-function startRemoteServer() {
+// Start the local Express + WebSocket server (LAN-only). The Cloudflare
+// tunnel is opt-in and started separately via startCloudflaredTunnel().
+// Idempotent — second calls are no-ops while a server is already running.
+function startLocalServer() {
+  if (remoteServer) return { success: true };
+  return startRemoteServer({ skipTunnel: true });
+}
+
+function startRemoteServer(opts) {
+  opts = opts || {};
   if (remoteServer) {
-    return { success: false, error: 'Server already running' };
+    // Already running — if caller wanted the tunnel and it isn't up, start it.
+    if (!opts.skipTunnel) startCloudflaredTunnel(remoteServerPort);
+    return { success: true };
   }
 
   const appExpress = express();
@@ -1457,7 +1468,11 @@ function startRemoteServer() {
       }
 
       // Start a Cloudflare Tunnel so phones on other networks can reach the server.
-      startCloudflaredTunnel(remoteServerPort);
+      // Skipped when called from the always-on local-server boot — the user
+      // opts in by clicking "Start Remote Server" / "Enable Internet Access".
+      if (!opts.skipTunnel) {
+        startCloudflaredTunnel(remoteServerPort);
+      }
     });
 
     // WebSocket endpoint at /plugin for the Logi Plugin Service plugin.
@@ -1586,13 +1601,20 @@ function stopRemoteServer() {
   return { success: true };
 }
 
-// IPC handlers for remote control
+// IPC handlers for remote control.
+// "Start" now means: ensure local server is up AND start the Cloudflare tunnel.
+// "Stop" means: stop the tunnel only — the local server stays running so the
+// Logi plugin's WebSocket connection survives.
 ipcMain.handle('start-remote-server', async () => {
   return startRemoteServer();
 });
 
 ipcMain.handle('stop-remote-server', async () => {
-  return stopRemoteServer();
+  stopCloudflaredTunnel();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('remote-tunnel-stopped');
+  }
+  return { success: true };
 });
 
 // Ensure GPU is enabled for transparency (especially on Windows)
@@ -1626,6 +1648,16 @@ app.whenReady().then(() => {
   // Auto-install the bundled Logi Plugin Service plugin (if Options+ is present).
   // Delayed so it doesn't compete with the main-window load.
   setTimeout(() => { ensureLogiPluginInstalled().catch(err => console.error('[logi-plugin] install error:', err)); }, 4000);
+
+  // Always-on local server so the Logi plugin's WebSocket has something to talk
+  // to without the user clicking Start Remote Server first. The Cloudflare tunnel
+  // (the actual phone-on-different-network feature) stays opt-in.
+  setTimeout(() => {
+    const result = startLocalServer();
+    if (!result || !result.success) {
+      console.error('[local-server] failed to auto-start:', result && result.error);
+    }
+  }, 500);
 });
 
 // ============================================================================
