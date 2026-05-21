@@ -104,6 +104,7 @@ export default function App() {
   const [dragOverIndex, setDragOverIndex] = useState(null);
   const [canDrag, setCanDrag] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(320);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [previewWidth, setPreviewWidth] = useState(60); // 60% for editor panel (operator preview gets remaining 40%)
   const [isResizingSidebar, setIsResizingSidebar] = useState(false);
   const [isResizingPreview, setIsResizingPreview] = useState(false);
@@ -2513,6 +2514,7 @@ export default function App() {
         if (settings.crosshairLength !== undefined) setCrosshairLength(settings.crosshairLength);
         if (settings.crosshairThickness !== undefined) setCrosshairThickness(settings.crosshairThickness);
         if (settings.countdownDuration !== undefined) setCountdownDuration(settings.countdownDuration);
+        if (settings.sidebarCollapsed !== undefined) setSidebarCollapsed(settings.sidebarCollapsed);
         if (settings.timerDisplayMode !== undefined) {
           setTimerDisplayMode(settings.timerDisplayMode);
         } else if (settings.showTimerSpeed !== undefined) {
@@ -2560,6 +2562,7 @@ export default function App() {
       countdownDuration,
       timerDisplayMode,
       timerCorner,
+      sidebarCollapsed,
       leadInMargin,
       chapterSpacing,
       wordsPerMinute,
@@ -2582,6 +2585,7 @@ export default function App() {
     countdownDuration,
     timerDisplayMode,
     timerCorner,
+    sidebarCollapsed,
     leadInMargin,
     chapterSpacing,
     wordsPerMinute,
@@ -4440,9 +4444,27 @@ export default function App() {
         [id^="chapter-content-"] li, .prompter-content li, .prompter-content-presenter li { margin: 0.2em 0; }
       `}</style>
       {/* Sidebar */}
+      {sidebarCollapsed ? (
+        <div className="bg-gray-800 border-r border-gray-700 flex flex-col items-center py-3" style={{ width: '40px' }}>
+          <button
+            onClick={() => setSidebarCollapsed(false)}
+            className="p-2 hover:bg-gray-700 rounded"
+            title="Show script list"
+          >
+            <ChevronRight size={18} />
+          </button>
+        </div>
+      ) : (
       <div className="bg-gray-800 border-r border-gray-700 flex flex-col relative" style={{ width: `${sidebarWidth}px` }}>
         <div className="p-4 border-b border-gray-700">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-4 gap-2">
+            <button
+              onClick={() => setSidebarCollapsed(true)}
+              className="p-1 hover:bg-gray-700 rounded"
+              title="Hide script list"
+            >
+              <ChevronLeft size={16} />
+            </button>
             {hasUnsavedChanges && (
               <span className="text-xs text-orange-400">● Unsaved</span>
             )}
@@ -4645,6 +4667,7 @@ export default function App() {
           onMouseDown={() => setIsResizingSidebar(true)}
         />
       </div>
+      )}
 
       {/* Main Content */}
       <div className="flex-1 flex">
@@ -5820,9 +5843,9 @@ export default function App() {
               {renderOperatorPreview()}
             </div>
           </div>
-          <div className="p-3 border-t border-gray-700 bg-gray-800 flex-shrink-0">
-            <div className="flex items-center justify-between gap-4 flex-wrap">
-              <div className="flex items-center gap-4 flex-wrap">
+          <div className="p-3 border-t border-gray-700 bg-gray-800 flex-shrink-0 h-14 overflow-hidden">
+            <div className="flex items-center justify-between gap-4 h-full">
+              <div className="flex items-center gap-4 min-w-0">
                 <div className="flex items-center gap-2 whitespace-nowrap">
                   <span className="text-xs text-gray-400">Elapsed:</span>
                   <span className="text-lg font-mono font-bold text-blue-400">{formatTime(elapsedTime)}</span>

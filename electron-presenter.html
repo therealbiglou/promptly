@@ -741,18 +741,25 @@
 	  }
 
 	  if (window.electron && window.electron.onPresenterScrollUpdate) {
-		window.electron.onPresenterScrollUpdate((data) => {
+		// Coalesce incoming scroll updates through requestAnimationFrame so we
+		// apply at most one scrollTop write per browser frame. IPC messages
+		// from the operator can arrive in bursts (especially during shuttling
+		// when speed changes rapidly), and synchronous scrollTop writes per
+		// message produce visible jitter on the presenter.
+		let pendingScroll = null;
+		let scrollRafId = 0;
+		const flushScroll = () => {
+		  scrollRafId = 0;
+		  if (pendingScroll === null) return;
 		  const scrollEl = document.getElementById('presenter-scroll');
-		  if (scrollEl) {
-			// Handle both old format (number) and new format (object with position)
-			if (typeof data === 'number') {
-			  // Direct pixel position
-			  scrollEl.scrollTop = data;
-			} else if (data && typeof data.position === 'number') {
-			  // Use absolute position for exact sync
-			  scrollEl.scrollTop = data.position;
-			}
-		  }
+		  if (scrollEl) scrollEl.scrollTop = pendingScroll;
+		  pendingScroll = null;
+		};
+		window.electron.onPresenterScrollUpdate((data) => {
+		  if (typeof data === 'number') pendingScroll = data;
+		  else if (data && typeof data.position === 'number') pendingScroll = data.position;
+		  else return;
+		  if (!scrollRafId) scrollRafId = requestAnimationFrame(flushScroll);
 		});
 	  }
 

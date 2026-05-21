@@ -1,6 +1,6 @@
 {
   "name": "promptly",
-  "version": "1.0.193",
+  "version": "1.0.194",
   "description": "Promptly - Professional Teleprompter Application",
   "author": "Your Name",
   "main": "electron-main.js",
