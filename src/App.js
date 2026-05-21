@@ -86,6 +86,8 @@ export default function App() {
   const [updateProgress, setUpdateProgress] = useState(null); // 0-100 while downloading
   const [updateDownloaded, setUpdateDownloaded] = useState(false);
   const [updateDismissed, setUpdateDismissed] = useState(false);
+  const [appVersion, setAppVersion] = useState('');
+  const [updateCheckState, setUpdateCheckState] = useState({ status: 'idle' }); // idle | checking | up-to-date | error
   const [showFullscreen, setShowFullscreen] = useState(false);
   const [fullscreenMonitor, setFullscreenMonitor] = useState(0);
   const [presenterWindow, setPresenterWindow] = useState(null);
@@ -3863,6 +3865,32 @@ export default function App() {
     return () => { delete window.getRemoteState; };
   }, [currentChapterIndex, activeScrollSpeed, isPlaying]);
 
+  // App version for the About section in settings
+  useEffect(() => {
+    if (!window.electron?.getAppVersion) return;
+    window.electron.getAppVersion().then(v => setAppVersion(v)).catch(() => {});
+  }, []);
+
+  // Manual "Check for updates" action from settings
+  const handleCheckForUpdates = async () => {
+    if (!window.electron?.checkForUpdatesNow) return;
+    setUpdateCheckState({ status: 'checking' });
+    try {
+      const result = await window.electron.checkForUpdatesNow();
+      if (!result?.ok) {
+        setUpdateCheckState({ status: 'error', error: result?.error || 'check failed' });
+      } else if (result.updateAvailable) {
+        // The autoUpdater's update-available event will fire and the toast will pop
+        setUpdateCheckState({ status: 'idle' });
+      } else {
+        setUpdateCheckState({ status: 'up-to-date', latest: result.current });
+        setTimeout(() => setUpdateCheckState(s => s.status === 'up-to-date' ? { status: 'idle' } : s), 4000);
+      }
+    } catch (err) {
+      setUpdateCheckState({ status: 'error', error: err.message });
+    }
+  };
+
   // Logi plugin install status (set by electron-main on launch and on reinstall)
   useEffect(() => {
     if (!window.electron?.onLogiPluginStatus) return;
@@ -5427,6 +5455,38 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* About / version */}
+                <div className="col-span-3 border-t border-gray-600 pt-3 mt-2">
+                  <h3 className="font-bold text-sm mb-3 text-gray-300 flex items-center gap-2">
+                    <AlertCircle size={16} />
+                    About
+                  </h3>
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div className="text-sm text-gray-300">
+                      Promptly <span className="font-mono text-purple-300">v{appVersion || '…'}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {updateCheckState.status === 'checking' && (
+                        <span className="text-xs text-blue-300">Checking…</span>
+                      )}
+                      {updateCheckState.status === 'up-to-date' && (
+                        <span className="text-xs text-green-400">✓ You're up to date</span>
+                      )}
+                      {updateCheckState.status === 'error' && (
+                        <span className="text-xs text-red-400">{updateCheckState.error}</span>
+                      )}
+                      <button
+                        onClick={handleCheckForUpdates}
+                        disabled={updateCheckState.status === 'checking'}
+                        className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded text-xs flex items-center gap-1"
+                      >
+                        <Download size={14} />
+                        Check for updates
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
               </div>
             )}
 
@@ -5913,7 +5973,10 @@ export default function App() {
                   <span className="text-sm font-mono text-gray-300">
                     {(() => {
                       const speedForEstimate = isPlaying ? activeScrollSpeed : scrollSpeed;
-                      if (speedForEstimate <= 0 || !isFinite(estimatedDuration) || estimatedDuration < 0) return '—';
+                      // Use rounded display value so anything that reads as
+                      // "0.0x" (incl. tiny non-zero values) shows "—" too.
+                      const displayedSpeed = Number(speedForEstimate.toFixed(1));
+                      if (displayedSpeed <= 0 || !isFinite(estimatedDuration) || estimatedDuration < 0) return '—';
                       return formatTime(estimatedDuration);
                     })()}
                   </span>

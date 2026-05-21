@@ -1001,7 +1001,10 @@
       const validSpeed = isFinite(speed) ? speed : 1.5;
       const validElapsed = (isFinite(elapsedTime) && elapsedTime >= 0) ? elapsedTime : 0;
       const reverse = validSpeed < 0;
-      const validEstimated = (!reverse && isFinite(estimatedDuration) && estimatedDuration >= 0) ? estimatedDuration : null;
+      // Tiny positive speeds round to "0.0" in the display but still compute a
+      // huge estimated duration — treat them as "no estimate".
+      const tooSlow = Number(validSpeed.toFixed(1)) <= 0;
+      const validEstimated = (!reverse && !tooSlow && isFinite(estimatedDuration) && estimatedDuration >= 0) ? estimatedDuration : null;
 
       if (elapsedTimeEl) elapsedTimeEl.textContent = formatTime(validElapsed);
       if (estimatedTimeEl) estimatedTimeEl.textContent = validEstimated === null ? '—' : formatTime(validEstimated);

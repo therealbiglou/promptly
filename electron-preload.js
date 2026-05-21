@@ -345,6 +345,8 @@ contextBridge.exposeInMainWorld('electron', {
   },
   downloadUpdate: () => ipcRenderer.send('update-download'),
   quitAndInstallUpdate: () => ipcRenderer.send('update-quit-and-install'),
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  checkForUpdatesNow: () => ipcRenderer.invoke('check-for-updates-now'),
 
   // Listen for remote server stopped event
   onRemoteServerStopped: (callback) => {

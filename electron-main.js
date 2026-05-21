@@ -1828,6 +1828,25 @@ ipcMain.on('update-quit-and-install', () => {
   autoUpdater.quitAndInstall();
 });
 
+// Settings → About: report current app version
+ipcMain.handle('get-app-version', () => app.getVersion());
+
+// Settings → About: user-triggered update check.
+// Sends a "no update available" signal when the check completes empty so the
+// renderer can show a "you're up to date" toast.
+ipcMain.handle('check-for-updates-now', async () => {
+  if (isDev) return { ok: false, error: 'updates disabled in dev' };
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    const current = app.getVersion();
+    const latest = result?.updateInfo?.version;
+    const updateAvailable = !!(latest && latest !== current);
+    return { ok: true, current, latest, updateAvailable };
+  } catch (err) {
+    return { ok: false, error: (err && err.message) || String(err) };
+  }
+});
+
 app.on('before-quit', () => {
   stopCloudflaredTunnel();
 });
