@@ -377,6 +377,12 @@ ipcMain.on('update-presenter-countdown', (event, value) => {
   }
 });
 
+ipcMain.on('update-presenter-timer', (event, payload) => {
+  if (presenterWindow && !presenterWindow.isDestroyed()) {
+    presenterWindow.webContents.send('presenter-timer-update', payload);
+  }
+});
+
 // Renderer pushes the current Promptly state to be broadcast to any connected
 // Logi plugin clients. We merge into latestPluginState so newly-connecting
 // clients get the most recent snapshot on connect.

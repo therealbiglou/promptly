@@ -223,6 +223,8 @@ export default function App() {
   const countdownDurationRef = useRef(0); // mirrors countdownDuration state so togglePlayPause sees latest value regardless of closure age
   const isPlayingRef = useRef(false);
   const hasReachedEndRef = useRef(false);
+  const presenterWindowRef = useRef(null);
+  const manualScrollModeRef = useRef(false);
   const presenterWindowScrollRef = useRef(null);
   const previewVideoRef = useRef(null); // For video stream of presenter window
   const previewStreamRef = useRef(null); // Store the MediaStream for cleanup
@@ -2055,8 +2057,11 @@ export default function App() {
     }, 3000);
   };
 
+  // Use the ref so callers from long-lived effects (remote/IPC handlers with
+  // [] deps) see the current presenter-window state, not a stale closure.
   const toggleManualScroll = () => {
-    if (!presenterWindow || presenterWindow.closed) {
+    const pw = presenterWindowRef.current;
+    if (!pw || pw.closed) {
       showPresenterRequiredToast();
       return;
     }
@@ -2067,7 +2072,8 @@ export default function App() {
   };
 
   const toggleSpotlight = () => {
-    if (!presenterWindow || presenterWindow.closed) {
+    const pw = presenterWindowRef.current;
+    if (!pw || pw.closed) {
       showPresenterRequiredToast();
       return;
     }
@@ -3116,6 +3122,8 @@ export default function App() {
   useEffect(() => { countdownDurationRef.current = countdownDuration; }, [countdownDuration]);
   useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
   useEffect(() => { hasReachedEndRef.current = hasReachedEnd; }, [hasReachedEnd]);
+  useEffect(() => { presenterWindowRef.current = presenterWindow; }, [presenterWindow]);
+  useEffect(() => { manualScrollModeRef.current = manualScrollMode; }, [manualScrollMode]);
 
   // Cleanup countdown timers on unmount
   useEffect(() => {
@@ -3647,7 +3655,10 @@ export default function App() {
             break;
           }
           case 'jog': {
-            // Pixel-delta manual scroll without needing manual-scroll-mode toggled.
+            // Pixel-delta manual scroll — only honored while manual-scroll mode
+            // is active. Silently ignored otherwise so the dial roller doesn't
+            // override normal playback.
+            if (!manualScrollModeRef.current) break;
             const px = Number(value) || 0;
             if (px !== 0 && scrollRef.current) {
               const maxScroll = scrollRef.current.scrollHeight - scrollRef.current.clientHeight;
@@ -3978,8 +3989,24 @@ export default function App() {
     updatePresenterContent();
   }, [presenterWindow, currentScript, fontSize, fontColor, bgColor, lineHeight,
       horizontalMargin, leadInMargin, chapterSpacing, crosshairColor, crosshairLength,
-      crosshairThickness, timerDisplayMode, timerCorner,
-      scrollProgress, scrollSpeed, activeScrollSpeed, elapsedTime, estimatedDuration]);
+      crosshairThickness, timerDisplayMode, timerCorner]);
+      // NOTE: scrollProgress, scrollSpeed, activeScrollSpeed, elapsedTime, estimatedDuration
+      // intentionally NOT in deps — those fast-changing values are pushed via the
+      // lightweight update-presenter-timer IPC below so we don't rebuild the
+      // chapter HTML on every dial tick.
+
+  // Lightweight timer/speed/progress push to the presenter window.
+  useEffect(() => {
+    if (!presenterWindow || presenterWindow.closed) return;
+    if (!presenterWindow.isElectron) return; // browser-mode handled by the next useEffect
+    if (!window.electron?.updatePresenterTimer) return;
+    window.electron.updatePresenterTimer({
+      scrollProgress,
+      scrollSpeed: activeScrollSpeed,
+      elapsedTime,
+      estimatedDuration
+    });
+  }, [presenterWindow, scrollProgress, activeScrollSpeed, elapsedTime, estimatedDuration]);
 
   // Update timer in presenter window
   useEffect(() => {
@@ -5793,16 +5820,22 @@ export default function App() {
               {renderOperatorPreview()}
             </div>
           </div>
-          <div className="p-3 border-t border-gray-700 bg-gray-800">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
+          <div className="p-3 border-t border-gray-700 bg-gray-800 flex-shrink-0">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <div className="flex items-center gap-4 flex-wrap">
+                <div className="flex items-center gap-2 whitespace-nowrap">
                   <span className="text-xs text-gray-400">Elapsed:</span>
                   <span className="text-lg font-mono font-bold text-blue-400">{formatTime(elapsedTime)}</span>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 whitespace-nowrap">
                   <span className="text-xs text-gray-400">Est:</span>
-                  <span className="text-sm font-mono text-gray-300">{formatTime(estimatedDuration)}</span>
+                  <span className="text-sm font-mono text-gray-300">
+                    {(() => {
+                      const speedForEstimate = isPlaying ? activeScrollSpeed : scrollSpeed;
+                      if (speedForEstimate <= 0 || !isFinite(estimatedDuration) || estimatedDuration < 0) return '—';
+                      return formatTime(estimatedDuration);
+                    })()}
+                  </span>
                 </div>
                 <div className="h-1.5 w-32 bg-gray-700 rounded-full overflow-hidden">
                   <div
@@ -5811,8 +5844,14 @@ export default function App() {
                   />
                 </div>
               </div>
-              <div className="text-sm">
-                <span className="text-gray-400">Speed:</span> <span className="font-semibold">{(isPlaying ? activeScrollSpeed : scrollSpeed).toFixed(1)}x</span>
+              <div className="text-sm whitespace-nowrap">
+                <span className="text-gray-400">Speed:</span>{' '}
+                <span className="font-semibold inline-block min-w-[3.5em] text-right">
+                  {(() => {
+                    const s = isPlaying ? activeScrollSpeed : scrollSpeed;
+                    return s < 0 ? `◀ ${Math.abs(s).toFixed(1)}x` : `${s.toFixed(1)}x`;
+                  })()}
+                </span>
               </div>
             </div>
           </div>

@@ -38,6 +38,22 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.send('update-presenter-countdown', value);
   },
 
+  // Send fast-changing timer/speed/progress numbers to the presenter window.
+  // Separated from updatePresenterContent so we don't rebuild the chapter HTML
+  // every dial tick.
+  updatePresenterTimer: (payload) => {
+    ipcRenderer.send('update-presenter-timer', payload);
+  },
+
+  // For the presenter window: listen for timer/speed/progress updates
+  onPresenterTimerUpdate: (callback) => {
+    const subscription = (event, payload) => callback(payload);
+    ipcRenderer.on('presenter-timer-update', subscription);
+    return () => {
+      ipcRenderer.removeListener('presenter-timer-update', subscription);
+    };
+  },
+
   // Push current Promptly state to the Logi plugin clients (via main process)
   pushPluginState: (state) => {
     ipcRenderer.send('plugin-state-push', state);

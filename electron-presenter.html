@@ -774,6 +774,14 @@
 		});
 	  }
 
+	  // Light-weight timer / speed / progress updates (separate from content)
+	  if (window.electron && window.electron.onPresenterTimerUpdate) {
+		window.electron.onPresenterTimerUpdate((p) => {
+		  if (!p) return;
+		  updateProgressDisplay(p.scrollProgress, p.scrollSpeed, p.elapsedTime, p.estimatedDuration);
+		});
+	  }
+
 	  // Listen for countdown updates (delayed-start before play)
 	  if (window.electron && window.electron.onPresenterCountdownUpdate) {
 		window.electron.onPresenterCountdownUpdate((value) => {
@@ -959,16 +967,17 @@
       const progressEl = document.getElementById('progress-bar');
       const speedEl = document.getElementById('speed-display');
 
-      // Validate and sanitize inputs
+      // Validate and sanitize inputs. Speed is signed (negative = reverse).
       const validProgress = (isFinite(progress) && progress >= 0 && progress <= 100) ? progress : 0;
-      const validSpeed = (isFinite(speed) && speed > 0) ? speed : 1.5;
+      const validSpeed = isFinite(speed) ? speed : 1.5;
       const validElapsed = (isFinite(elapsedTime) && elapsedTime >= 0) ? elapsedTime : 0;
-      const validEstimated = (isFinite(estimatedDuration) && estimatedDuration >= 0) ? estimatedDuration : 0;
+      const reverse = validSpeed < 0;
+      const validEstimated = (!reverse && isFinite(estimatedDuration) && estimatedDuration >= 0) ? estimatedDuration : null;
 
       if (elapsedTimeEl) elapsedTimeEl.textContent = formatTime(validElapsed);
-      if (estimatedTimeEl) estimatedTimeEl.textContent = formatTime(validEstimated);
+      if (estimatedTimeEl) estimatedTimeEl.textContent = validEstimated === null ? '—' : formatTime(validEstimated);
       if (progressEl) progressEl.style.width = `${validProgress}%`;
-      if (speedEl) speedEl.textContent = validSpeed.toFixed(1);
+      if (speedEl) speedEl.textContent = reverse ? `◀ ${Math.abs(validSpeed).toFixed(1)}` : validSpeed.toFixed(1);
     }
 
     // Send window dimensions to main window for 1:1 operator preview
