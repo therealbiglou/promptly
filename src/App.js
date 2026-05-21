@@ -226,6 +226,8 @@ export default function App() {
   const hasReachedEndRef = useRef(false);
   const presenterWindowRef = useRef(null);
   const manualScrollModeRef = useRef(false);
+  const scrollSpeedRef = useRef(1.5);
+  const activeScrollSpeedRef = useRef(1.5);
   const presenterWindowScrollRef = useRef(null);
   const previewVideoRef = useRef(null); // For video stream of presenter window
   const previewStreamRef = useRef(null); // Store the MediaStream for cleanup
@@ -1745,7 +1747,7 @@ export default function App() {
                 if (targetChapter.customSpeed !== undefined && targetChapter.customSpeed !== null) {
                   targetSpeedRef.current = targetChapter.customSpeed;
                 } else {
-                  targetSpeedRef.current = scrollSpeed;
+                  targetSpeedRef.current = scrollSpeedRef.current;
                 }
                 break;
               }
@@ -1754,12 +1756,15 @@ export default function App() {
         }
       }
 
-      // Nearly instant transition to the locked-in target speed
-      const speedTransitionRate = 0.8; // Very high rate = nearly instant transition
-      const newActiveSpeed = activeScrollSpeed + (targetSpeedRef.current - activeScrollSpeed) * speedTransitionRate;
+      // Nearly instant transition to the locked-in target speed.
+      // Reads via refs so dial-driven scrollSpeed changes don't cancel & restart
+      // the animation loop (which would zero out the per-frame delta).
+      const speedTransitionRate = 0.8;
+      const currentActive = activeScrollSpeedRef.current;
+      const newActiveSpeed = currentActive + (targetSpeedRef.current - currentActive) * speedTransitionRate;
 
-      // Only update state every 10 frames to reduce re-renders
-      if (Math.abs(newActiveSpeed - activeScrollSpeed) > 0.01) {
+      if (Math.abs(newActiveSpeed - currentActive) > 0.01) {
+        activeScrollSpeedRef.current = newActiveSpeed;
         setActiveScrollSpeed(newActiveSpeed);
       }
 
@@ -1847,7 +1852,7 @@ export default function App() {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [isPlaying, scrollSpeed, activeScrollSpeed, showFullscreen, chapterPositions]);
+  }, [isPlaying, showFullscreen, chapterPositions]);
 
   // Sync preview scroll position when pausing
   useEffect(() => {
@@ -1872,8 +1877,9 @@ export default function App() {
 
     // Only update activeScrollSpeed and target if current chapter doesn't have custom speed
     if (!currentChapter || currentChapter.customSpeed === undefined || currentChapter.customSpeed === null) {
+      activeScrollSpeedRef.current = scrollSpeed;
+      targetSpeedRef.current = scrollSpeed;
       setActiveScrollSpeed(scrollSpeed);
-      targetSpeedRef.current = scrollSpeed; // Update target speed ref too
     }
   }, [scrollSpeed, chapterPositions]);
 
@@ -3128,6 +3134,8 @@ export default function App() {
   useEffect(() => { hasReachedEndRef.current = hasReachedEnd; }, [hasReachedEnd]);
   useEffect(() => { presenterWindowRef.current = presenterWindow; }, [presenterWindow]);
   useEffect(() => { manualScrollModeRef.current = manualScrollMode; }, [manualScrollMode]);
+  useEffect(() => { scrollSpeedRef.current = scrollSpeed; }, [scrollSpeed]);
+  useEffect(() => { activeScrollSpeedRef.current = activeScrollSpeed; }, [activeScrollSpeed]);
 
   // Cleanup countdown timers on unmount
   useEffect(() => {
@@ -4129,7 +4137,17 @@ export default function App() {
     }
   }, [isResizingSidebar, isResizingPreview, sidebarWidth]);
 
-  const PrompterContent = React.memo(({ scrollRefProp, scale = 1, isPreview = false }) => {
+  // PrompterContent must keep a stable identity across renders. Defining a new
+  // React.memo wrapper on every App render makes React see a "different
+  // component type" each time → it unmounts/remounts the subtree → the DOM
+  // (and its scrollTop) is destroyed and rebuilt. That manifests as the
+  // preview briefly jumping to position 0 whenever App re-renders rapidly
+  // (e.g. while the Logi dial is sending dozens of speed-adjust ticks/sec).
+  //
+  // useMemo with the display-affecting deps keeps the identity stable through
+  // dial spins (scrollSpeed isn't in the deps), and re-creates the component
+  // only when the visual layout/content actually needs to change.
+  const PrompterContent = useMemo(() => React.memo(({ scrollRefProp, scale = 1, isPreview = false }) => {
     // For preview, restore scroll position when component renders/re-renders
     // This prevents the snap-to-start issue when playback is paused
     useEffect(() => {
@@ -4210,7 +4228,7 @@ export default function App() {
       ))}
         </div>
     );
-  });
+  }), [currentScript, fontSize, fontColor, lineHeight, chapterSpacing, horizontalMargin, leadInMargin, presenterWindowDimensions]);
 
   // Operator Preview - 1:1 scaled replica of presenter window content
   const renderOperatorPreview = () => {
