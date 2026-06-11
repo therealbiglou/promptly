@@ -1,6 +1,6 @@
 {
   "name": "promptly",
-  "version": "1.0.198",
+  "version": "1.0.199",
   "description": "Promptly - Professional Teleprompter Application",
   "author": "Your Name",
   "main": "electron-main.js",
@@ -96,6 +96,14 @@
       {
         "from": "logi-plugin/dist",
         "to": "logi-plugin"
+      },
+      {
+        "from": "vendor/camera-bridge",
+        "to": "camera-bridge",
+        "filter": [
+          "promptly-camera-bridge.exe",
+          "Lmxptpif.dll"
+        ]
       }
     ],
     "publish": [
