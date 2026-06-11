@@ -364,6 +364,33 @@ contextBridge.exposeInMainWorld('electron', {
     return () => {
       ipcRenderer.removeListener('remote-command', subscription);
     };
+  },
+
+  // ============================================
+  // Camera Control (Lumix S5 II over USB)
+  // ============================================
+  camera: {
+    // Fire-and-forget commands; the authoritative state comes back via onStatus.
+    recordStart: () => ipcRenderer.send('camera-command', 'camera-record-start'),
+    recordStop: () => ipcRenderer.send('camera-command', 'camera-record-stop'),
+    toggle: () => ipcRenderer.send('camera-command', 'camera-record-toggle'),
+
+    // Pull the current status snapshot.
+    getStatus: () => ipcRenderer.invoke('camera-get-status'),
+
+    // Subscribe to status changes {available, connected, model, recording}.
+    onStatus: (callback) => {
+      const subscription = (event, status) => callback(status);
+      ipcRenderer.on('camera-status', subscription);
+      return () => ipcRenderer.removeListener('camera-status', subscription);
+    },
+
+    // Subscribe to command errors (e.g. record failed, no camera).
+    onError: (callback) => {
+      const subscription = (event, message) => callback(message);
+      ipcRenderer.on('camera-error', subscription);
+      return () => ipcRenderer.removeListener('camera-error', subscription);
+    }
   }
 });
 

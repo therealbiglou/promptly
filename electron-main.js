@@ -11,6 +11,7 @@ const os = require('os');
 const { spawn } = require('child_process');
 const { autoUpdater } = require('electron-updater');
 const { WebSocketServer } = require('ws');
+const { CameraManager } = require('./camera-control');
 // Note: pdf-parse is lazy-loaded only when needed to avoid DOMMatrix errors
 
 // Note: GPU acceleration is REQUIRED for transparent windows on Windows
@@ -29,7 +30,11 @@ let cloudflaredProcess = null; // Spawned cloudflared tunnel subprocess
 let remoteServer = null;
 let remoteServerPort = 3001;
 let pluginWss = null; // WebSocket server for the Logi plugin (on the same HTTP server, path /plugin)
-let latestPluginState = { isPlaying: false, speed: 1.5, chapterIndex: 0, totalChapters: 0, isCountingDown: false, hasReachedEnd: false };
+let latestPluginState = { isPlaying: false, speed: 1.5, chapterIndex: 0, totalChapters: 0, isCountingDown: false, hasReachedEnd: false, isRecording: false };
+
+// Camera control (Lumix S5 II over USB via the bridge subprocess)
+let cameraManager = null;
+let latestCameraStatus = { available: false, connected: false, model: null, recording: false };
 
 // Path for storing persistent data
 const userDataPath = app.getPath('userData');
@@ -386,18 +391,21 @@ ipcMain.on('update-presenter-timer', (event, payload) => {
 // Renderer pushes the current Promptly state to be broadcast to any connected
 // Logi plugin clients. We merge into latestPluginState so newly-connecting
 // clients get the most recent snapshot on connect.
+function broadcastPluginState() {
+  if (!pluginWss) return;
+  const payload = JSON.stringify({ type: 'state', ...latestPluginState });
+  pluginWss.clients.forEach(client => {
+    if (client.readyState === 1) {
+      try { client.send(payload); } catch {}
+    }
+  });
+}
+
 ipcMain.on('plugin-state-push', (event, state) => {
   if (state && typeof state === 'object') {
     latestPluginState = { ...latestPluginState, ...state };
   }
-  if (pluginWss) {
-    const payload = JSON.stringify({ type: 'state', ...latestPluginState });
-    pluginWss.clients.forEach(client => {
-      if (client.readyState === 1) {
-        try { client.send(payload); } catch {}
-      }
-    });
-  }
+  broadcastPluginState();
 });
 
 
@@ -926,6 +934,22 @@ function startRemoteServer(opts) {
           }
           .play-pause:active { background: #059669; }
 
+          .rec-button {
+            background: #374151;
+            color: white;
+            border: 2px solid #ef4444;
+          }
+          .rec-button .icon { color: #ef4444; }
+          .rec-button.recording {
+            background: #ef4444;
+            border-color: #ef4444;
+            animation: recpulse 1.2s ease-in-out infinite;
+          }
+          .rec-button.recording .icon { color: white; }
+          .rec-button:disabled { border-color: #6b7280; }
+          .rec-button:disabled .icon { color: #6b7280; }
+          @keyframes recpulse { 0%,100% { opacity: 1; } 50% { opacity: 0.65; } }
+
           .speed-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
           .speed-controls button {
             background: #6366f1;
@@ -1080,6 +1104,11 @@ function startRemoteServer(opts) {
             <span>Play / Pause</span>
           </button>
 
+          <button class="rec-button" id="rec-button" onclick="sendCommand('camera-record-toggle')" style="display:none;">
+            <span class="icon">●</span>
+            <span id="rec-label">REC</span>
+          </button>
+
           <div class="speed-controls">
             <button onclick="sendCommand('speed-up', currentSpeedIncrement)">
               <span class="icon">▲</span>
@@ -1228,8 +1257,26 @@ function startRemoteServer(opts) {
                 speedEl.textContent = state.speed.toFixed(1) + 'x';
               }
               applyCurrentChapter(state.currentChapterIndex);
+              updateRecButton(state.camera);
             } catch (error) {
               console.error('Failed to fetch state:', error);
+            }
+          }
+
+          // Reflect camera status on the REC button (hidden unless a camera bridge is available).
+          function updateRecButton(camera) {
+            const btn = document.getElementById('rec-button');
+            const label = document.getElementById('rec-label');
+            if (!btn) return;
+            if (!camera || !camera.available) { btn.style.display = 'none'; return; }
+            btn.style.display = 'flex';
+            btn.disabled = !camera.connected;
+            if (camera.recording) {
+              btn.classList.add('recording');
+              if (label) label.textContent = 'STOP';
+            } else {
+              btn.classList.remove('recording');
+              if (label) label.textContent = camera.connected ? 'REC' : 'NO CAM';
             }
           }
 
@@ -1421,7 +1468,7 @@ function startRemoteServer(opts) {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.executeJavaScript('window.getRemoteState ? window.getRemoteState() : {}')
         .then(state => {
-          res.json(state);
+          res.json({ ...state, camera: latestCameraStatus });
         })
         .catch(error => {
           console.error('Error getting state:', error);
@@ -1452,6 +1499,11 @@ function startRemoteServer(opts) {
   appExpress.post('/command', (req, res) => {
     const { command, value } = req.body;
     console.log('Remote command received:', command, value);
+
+    // Camera commands are handled in the main process, not the renderer.
+    if (typeof command === 'string' && command.startsWith('camera-')) {
+      return res.json({ success: handleCameraCommand(command) });
+    }
 
     // Send command to main window with optional value
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1503,6 +1555,9 @@ function startRemoteServer(opts) {
         let msg;
         try { msg = JSON.parse(data.toString()); } catch { return; }
         if (msg && msg.type === 'command' && msg.name) {
+          // Camera commands are handled in the main process; everything else is
+          // forwarded to the renderer as a remote-command.
+          if (handleCameraCommand(msg.name)) return;
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('remote-command', { command: msg.name, value: msg.value });
           }
@@ -1623,6 +1678,82 @@ ipcMain.handle('stop-remote-server', async () => {
   return { success: true };
 });
 
+// ============================================
+// Camera Control (Lumix S5 II over USB via bridge subprocess)
+// ============================================
+
+// Resolve how to launch the camera bridge. Prefer a real native bridge .exe if
+// present (dropped in once the DC SDK build exists); otherwise fall back to the
+// Node mock bridge so the app is fully functional without the SDK or hardware.
+function resolveCameraBridge() {
+  const dir = isDev
+    ? path.join(__dirname, 'vendor', 'camera-bridge')
+    : path.join(process.resourcesPath, 'camera-bridge');
+  const exePath = path.join(dir, 'promptly-camera-bridge.exe');
+  if (fs.existsSync(exePath)) {
+    return { command: exePath, args: [], env: null, kind: 'native' };
+  }
+  const mockPath = path.join(dir, 'mock-bridge.js');
+  if (fs.existsSync(mockPath)) {
+    // Run the mock via this Electron binary in pure-Node mode.
+    return { command: process.execPath, args: [mockPath], env: { ELECTRON_RUN_AS_NODE: '1' }, kind: 'mock' };
+  }
+  return null;
+}
+
+function broadcastCameraStatus() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('camera-status', latestCameraStatus);
+  }
+  // Keep the Logi plugin state in sync so devices can show/announce REC state.
+  latestPluginState = {
+    ...latestPluginState,
+    isRecording: latestCameraStatus.recording,
+    cameraConnected: latestCameraStatus.connected
+  };
+  broadcastPluginState();
+}
+
+function startCameraManager() {
+  if (cameraManager) return;
+  const bridge = resolveCameraBridge();
+  if (!bridge) {
+    console.warn('[camera] no bridge found (native or mock) — camera control disabled');
+    return;
+  }
+  console.log(`[camera] starting ${bridge.kind} bridge: ${bridge.command} ${bridge.args.join(' ')}`);
+  cameraManager = new CameraManager({
+    spawn: (cmd, args, opts) => spawn(cmd, args, {
+      ...opts,
+      windowsHide: true,
+      env: bridge.env ? { ...process.env, ...bridge.env } : process.env
+    }),
+    command: bridge.command,
+    args: bridge.args,
+    log: (m) => console.log('[camera] ' + m),
+    onStatus: (s) => { latestCameraStatus = s; broadcastCameraStatus(); },
+    onError: (msg) => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('camera-error', msg);
+    }
+  });
+  cameraManager.start();
+}
+
+// Route a camera-* command to the manager. Returns true if it was handled.
+function handleCameraCommand(name) {
+  if (!cameraManager) return false;
+  switch (name) {
+    case 'camera-record-toggle': cameraManager.toggleRecord(); return true;
+    case 'camera-record-start': cameraManager.recordStart(); return true;
+    case 'camera-record-stop': cameraManager.recordStop(); return true;
+    default: return false;
+  }
+}
+
+// IPC from the main React UI
+ipcMain.on('camera-command', (event, name) => { handleCameraCommand(name); });
+ipcMain.handle('camera-get-status', () => latestCameraStatus);
+
 // Ensure GPU is enabled for transparency (especially on Windows)
 // These command line switches MUST be set before app.whenReady()
 app.commandLine.appendSwitch('enable-transparent-visuals');
@@ -1664,6 +1795,10 @@ app.whenReady().then(() => {
       console.error('[local-server] failed to auto-start:', result && result.error);
     }
   }, 500);
+
+  // Start the camera bridge (mock until the real SDK bridge .exe is present).
+  // Delayed so it doesn't compete with the main-window load.
+  setTimeout(() => { startCameraManager(); }, 1500);
 });
 
 // ============================================================================
@@ -1849,6 +1984,7 @@ ipcMain.handle('check-for-updates-now', async () => {
 
 app.on('before-quit', () => {
   stopCloudflaredTunnel();
+  if (cameraManager) { try { cameraManager.stop(); } catch {} cameraManager = null; }
 });
 
 app.on('window-all-closed', () => {

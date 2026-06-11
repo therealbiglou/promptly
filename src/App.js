@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Play, Pause, Settings, FileText, Download, Upload, Edit2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronUp, ChevronDown, List, ListOrdered, Plus, GripVertical, Trash2, Maximize2, Eye, EyeOff, Monitor, Bold, Italic, Underline, Palette, AlertCircle, Timer, Zap, Scissors, Clock, Type, Droplet, Move, BookOpen, Target, Check, X, FileDown, ArrowUpDown, Crosshair, Gauge } from 'lucide-react';
+import { Play, Pause, Settings, FileText, Download, Upload, Edit2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronUp, ChevronDown, List, ListOrdered, Plus, GripVertical, Trash2, Maximize2, Eye, EyeOff, Monitor, Bold, Italic, Underline, Palette, AlertCircle, Timer, Zap, Scissors, Clock, Type, Droplet, Move, BookOpen, Target, Check, X, FileDown, ArrowUpDown, Crosshair, Gauge, Circle } from 'lucide-react';
 import QRCode from 'qrcode';
 import { jsPDF } from 'jspdf';
 
@@ -73,6 +73,10 @@ export default function App() {
   const [scrollPosition, setScrollPosition] = useState(0);
   const [speedIncrement, setSpeedIncrement] = useState(0.1); // How much to change speed with keyboard shortcuts
   const [showSettings, setShowSettings] = useState(false);
+  // Camera control (Lumix S5 II over USB via the bridge subprocess)
+  const [cameraStatus, setCameraStatus] = useState({ available: false, connected: false, model: null, recording: false });
+  const [linkRecordingToPlayback, setLinkRecordingToPlayback] = useState(false);
+  const [cameraError, setCameraError] = useState(null);
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
   const [showRemote, setShowRemote] = useState(false);
   const [remoteServerActive, setRemoteServerActive] = useState(false);
@@ -3152,6 +3156,36 @@ export default function App() {
     }
   };
 
+  // Manual REC toggle — fires the camera record toggle in the main process.
+  const toggleRecord = () => {
+    if (window.electron?.camera) window.electron.camera.toggle();
+  };
+
+  // Subscribe to camera status + errors from the bridge (via main process).
+  useEffect(() => {
+    if (!window.electron?.camera) return;
+    window.electron.camera.getStatus().then((s) => { if (s) setCameraStatus(s); }).catch(() => {});
+    const unsubStatus = window.electron.camera.onStatus((s) => { setCameraStatus(s); setCameraError(null); });
+    const unsubError = window.electron.camera.onError((msg) => setCameraError(msg));
+    return () => { unsubStatus && unsubStatus(); unsubError && unsubError(); };
+  }, []);
+
+  // Auto-clear a transient camera error after a few seconds.
+  useEffect(() => {
+    if (!cameraError) return;
+    const t = setTimeout(() => setCameraError(null), 5000);
+    return () => clearTimeout(t);
+  }, [cameraError]);
+
+  // Link-to-playback: when enabled and a camera is connected, start recording when
+  // playback begins and stop when it pauses/ends. Watching isPlaying covers every
+  // trigger path (button, keyboard, remote, IPC) uniformly.
+  useEffect(() => {
+    if (!linkRecordingToPlayback || !window.electron?.camera || !cameraStatus.connected) return;
+    if (isPlaying) window.electron.camera.recordStart();
+    else window.electron.camera.recordStop();
+  }, [isPlaying, linkRecordingToPlayback, cameraStatus.connected]);
+
   // Keep refs in sync with state so all togglePlayPause callers read the latest values.
   useEffect(() => { countdownDurationRef.current = countdownDuration; }, [countdownDuration]);
   useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
@@ -5322,6 +5356,50 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* Camera Control */}
+                <div className="col-span-3 border-b border-gray-600 pb-4 mb-2">
+                  <h3 className="font-bold text-sm mb-3 text-red-400 flex items-center gap-2">
+                    <Circle size={16} />
+                    Camera Control
+                  </h3>
+                  {!cameraStatus.available ? (
+                    <div className="text-xs text-gray-400">
+                      Camera control unavailable — the bridge isn't running. Connect a supported Lumix
+                      (S5 II) over USB in [PC(Tether)] mode; the bridge starts automatically when present.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-4 items-start">
+                      <div>
+                        <label className="block text-sm mb-2">Status</label>
+                        <div className="flex items-center gap-2 text-sm">
+                          <span className={`inline-block w-2.5 h-2.5 rounded-full ${
+                            cameraStatus.recording ? 'bg-red-500 animate-pulse'
+                              : cameraStatus.connected ? 'bg-green-500' : 'bg-gray-500'
+                          }`} />
+                          <span>
+                            {cameraStatus.recording ? 'Recording'
+                              : cameraStatus.connected ? `Connected: ${cameraStatus.model || 'camera'}`
+                              : 'Disconnected'}
+                          </span>
+                        </div>
+                        {cameraError && <div className="text-xs text-red-400 mt-2">{cameraError}</div>}
+                      </div>
+                      <div>
+                        <label className="block text-sm mb-2">Recording</label>
+                        <label className="flex items-center gap-2 text-sm cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={linkRecordingToPlayback}
+                            onChange={(e) => setLinkRecordingToPlayback(e.target.checked)}
+                          />
+                          Link recording to playback
+                        </label>
+                        <div className="text-xs text-gray-400 mt-1">Start/stop the camera automatically when the teleprompter plays/pauses.</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 {/* Display Settings */}
                 <div className="col-span-3 border-b border-gray-600 pb-2 mb-2">
                   <h3 className="font-bold text-sm mb-3 text-green-400 flex items-center gap-2">
@@ -5798,6 +5876,30 @@ export default function App() {
             >
               {isPlaying ? <Pause size={20} /> : <Play size={20} />}
             </button>
+
+            {cameraStatus.available && (
+              <button
+                onClick={toggleRecord}
+                disabled={!cameraStatus.connected}
+                className={`p-2 rounded-lg flex items-center gap-1.5 ${
+                  !cameraStatus.connected
+                    ? 'bg-gray-600 cursor-not-allowed opacity-50'
+                    : cameraStatus.recording
+                      ? 'bg-red-600 hover:bg-red-700 animate-pulse'
+                      : 'bg-gray-700 hover:bg-gray-600'
+                }`}
+                title={
+                  !cameraStatus.connected
+                    ? 'Camera disconnected'
+                    : cameraStatus.recording
+                      ? `Stop recording (${cameraStatus.model || 'camera'})`
+                      : `Start recording (${cameraStatus.model || 'camera'})`
+                }
+              >
+                <Circle size={16} fill={cameraStatus.recording ? 'currentColor' : 'none'} />
+                <span className="text-xs font-semibold">REC</span>
+              </button>
+            )}
 
             <button
               onClick={() => {
