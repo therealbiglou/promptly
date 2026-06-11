@@ -26,7 +26,7 @@
     "ws": "^8.20.1"
   },
   "scripts": {
-    "prebuild": "node scripts/fetch-cloudflared.js && node scripts/build-logi-plugin.js",
+    "prebuild": "node scripts/fetch-cloudflared.js && node scripts/build-logi-plugin.js && node scripts/build-camera-bridge.js",
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
