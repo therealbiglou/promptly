@@ -15,29 +15,59 @@
 'use strict';
 
 const readline = require('readline');
+const net = require('net');
+const fs = require('fs');
+const path = require('path');
 
 const MODEL = 'DC-S5M2';
 
 let connected = false;
 let recording = false;
 
+// Live view: stream a static test-card JPEG to Node's frame port at ~15 fps.
+let liveviewActive = false;
+let liveviewSocket = null;
+let liveviewTimer = null;
+let mockFrame = null;
+try { mockFrame = fs.readFileSync(path.join(__dirname, 'mock-frame.jpg')); } catch (_) {}
+
 function emit(obj) {
   process.stdout.write(JSON.stringify(obj) + '\n');
 }
 
-function handle(cmd) {
-  switch (cmd) {
+function startLiveview(framePort) {
+  if (liveviewActive) { emit({ event: 'liveview', value: true }); return; }
+  if (!connected) { emit({ event: 'error', message: 'No camera connected' }); return; }
+  if (!mockFrame) { emit({ event: 'error', message: 'Mock frame asset missing' }); return; }
+  liveviewSocket = net.connect(framePort, '127.0.0.1', () => {
+    liveviewActive = true;
+    emit({ event: 'liveview', value: true });
+    liveviewTimer = setInterval(() => {
+      const header = Buffer.alloc(4);
+      header.writeUInt32BE(mockFrame.length, 0);
+      try { liveviewSocket.write(Buffer.concat([header, mockFrame])); } catch (_) {}
+    }, 66);
+  });
+  liveviewSocket.on('error', () => stopLiveview());
+  liveviewSocket.on('close', () => { if (liveviewActive) stopLiveview(); });
+}
+
+function stopLiveview() {
+  if (liveviewTimer) { clearInterval(liveviewTimer); liveviewTimer = null; }
+  if (liveviewSocket) { try { liveviewSocket.destroy(); } catch (_) {} liveviewSocket = null; }
+  if (liveviewActive) { liveviewActive = false; emit({ event: 'liveview', value: false }); }
+}
+
+function handle(msg) {
+  switch (msg.cmd) {
     case 'connect':
-      if (!connected) {
-        connected = true;
-        emit({ event: 'connected', model: MODEL });
-      } else {
-        emit({ event: 'connected', model: MODEL });
-      }
+      connected = true;
+      emit({ event: 'connected', model: MODEL });
       break;
 
     case 'disconnect':
       if (connected) {
+        stopLiveview();
         connected = false;
         if (recording) { recording = false; emit({ event: 'recording', value: false }); }
         emit({ event: 'disconnected' });
@@ -54,13 +84,22 @@ function handle(cmd) {
       if (recording) { recording = false; emit({ event: 'recording', value: false }); }
       break;
 
+    case 'liveview-start':
+      startLiveview(msg.framePort);
+      break;
+
+    case 'liveview-stop':
+      stopLiveview();
+      break;
+
     case 'status':
       emit(connected ? { event: 'connected', model: MODEL } : { event: 'disconnected' });
       emit({ event: 'recording', value: recording });
+      emit({ event: 'liveview', value: liveviewActive });
       break;
 
     default:
-      emit({ event: 'error', message: 'Unknown command: ' + cmd });
+      emit({ event: 'error', message: 'Unknown command: ' + msg.cmd });
   }
 }
 
@@ -70,7 +109,7 @@ rl.on('line', (line) => {
   if (!trimmed) return;
   let msg;
   try { msg = JSON.parse(trimmed); } catch { emit({ event: 'error', message: 'Bad JSON: ' + trimmed }); return; }
-  if (msg && typeof msg.cmd === 'string') handle(msg.cmd);
+  if (msg && typeof msg.cmd === 'string') handle(msg);
 });
 
 // Announce readiness once stdin is wired up.

@@ -175,6 +175,19 @@
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
     }
     @keyframes recpulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+    /* Live-view camera feed — covers the script; matches the teleprompter flip. */
+    #liveview-img {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #000;
+      display: none;
+      z-index: 55;
+    }
+    #liveview-img.active { display: block; }
     
     .timer-flex {
       display: flex;
@@ -387,6 +400,9 @@
 
     <!-- Recording indicator -->
     <div id="rec-indicator"><span class="rec-dot"></span><span class="rec-text">REC</span></div>
+
+    <!-- Live-view camera feed -->
+    <img id="liveview-img" alt="Camera live view" />
 
     <div id="timer-overlay">
       <div class="timer-flex">
@@ -853,6 +869,27 @@
 		});
 	  }
 
+	  // Live-view camera feed — matches the teleprompter flip, covers the script.
+	  let liveviewFlipH = false, liveviewFlipV = false;
+	  function applyLiveviewTransform() {
+		const img = document.getElementById('liveview-img');
+		if (img) img.style.transform = 'scaleX(' + (liveviewFlipH ? -1 : 1) + ') scaleY(' + (liveviewFlipV ? -1 : 1) + ')';
+	  }
+	  if (window.electron && window.electron.onPresenterLiveviewUpdate) {
+		window.electron.onPresenterLiveviewUpdate((data) => {
+		  const img = document.getElementById('liveview-img');
+		  if (!img) return;
+		  if (data && data.active && data.url) {
+			applyLiveviewTransform();
+			img.src = data.url + '?t=' + Date.now(); // cache-bust to force a fresh MJPEG stream
+			img.classList.add('active');
+		  } else {
+			img.classList.remove('active');
+			img.removeAttribute('src');
+		  }
+		});
+	  }
+
 	  // Listen for countdown updates (delayed-start before play)
 	  if (window.electron && window.electron.onPresenterCountdownUpdate) {
 		window.electron.onPresenterCountdownUpdate((value) => {
@@ -956,6 +993,11 @@
       // Render chapters
       const scrollEl = document.getElementById('presenter-scroll');
       const transform = `scaleX(${data.flipHorizontal ? -1 : 1}) scaleY(${data.flipVertical ? -1 : 1})`;
+
+      // Keep the live-view feed's mirror in sync with the teleprompter flip.
+      liveviewFlipH = !!data.flipHorizontal;
+      liveviewFlipV = !!data.flipVertical;
+      applyLiveviewTransform();
       
       let html = '';
       

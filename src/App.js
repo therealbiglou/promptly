@@ -74,7 +74,7 @@ export default function App() {
   const [speedIncrement, setSpeedIncrement] = useState(0.1); // How much to change speed with keyboard shortcuts
   const [showSettings, setShowSettings] = useState(false);
   // Camera control (Lumix S5 II over USB via the bridge subprocess)
-  const [cameraStatus, setCameraStatus] = useState({ available: false, connected: false, model: null, recording: false });
+  const [cameraStatus, setCameraStatus] = useState({ available: false, connected: false, model: null, recording: false, liveview: false });
   const [linkRecordingToPlayback, setLinkRecordingToPlayback] = useState(false);
   const [cameraError, setCameraError] = useState(null);
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
@@ -3161,6 +3161,18 @@ export default function App() {
     if (window.electron?.camera) window.electron.camera.toggle();
   };
 
+  // Live-view toggle — swaps presenter + operator preview to the camera feed.
+  const toggleLiveview = () => {
+    if (window.electron?.camera) window.electron.camera.liveviewToggle();
+  };
+
+  // Auto-stop live view when playback starts — never read the script with the feed up.
+  useEffect(() => {
+    if (isPlaying && cameraStatus.liveview && window.electron?.camera) {
+      window.electron.camera.liveviewStop();
+    }
+  }, [isPlaying, cameraStatus.liveview]);
+
   // Subscribe to camera status + errors from the bridge (via main process).
   useEffect(() => {
     if (!window.electron?.camera) return;
@@ -5901,6 +5913,19 @@ export default function App() {
               </button>
             )}
 
+            {cameraStatus.available && cameraStatus.connected && (
+              <button
+                onClick={toggleLiveview}
+                className={`p-2 rounded-lg flex items-center gap-1.5 ${
+                  cameraStatus.liveview ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-700 hover:bg-gray-600'
+                }`}
+                title={cameraStatus.liveview ? 'Hide camera live view' : 'Show camera live view (framing check)'}
+              >
+                <Eye size={16} />
+                <span className="text-xs font-semibold">LIVE</span>
+              </button>
+            )}
+
             <button
               onClick={() => {
                 cancelCountdown();
@@ -6068,6 +6093,16 @@ export default function App() {
             <div key="preview-content" className="h-full relative z-10">
               {renderOperatorPreview()}
             </div>
+            {cameraStatus.liveview && (
+              <div className="absolute inset-0 z-20 bg-black flex items-center justify-center">
+                <img
+                  src="http://127.0.0.1:3001/liveview"
+                  alt="Camera live view"
+                  className="max-w-full max-h-full"
+                  style={{ objectFit: 'contain' }}
+                />
+              </div>
+            )}
           </div>
           <div className="p-3 border-t border-gray-700 bg-gray-800 flex-shrink-0 h-14 overflow-hidden">
             <div className="flex items-center justify-between gap-4 h-full">

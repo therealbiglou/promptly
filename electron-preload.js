@@ -77,6 +77,15 @@ contextBridge.exposeInMainWorld('electron', {
     };
   },
 
+  // For the presenter window: listen for live-view updates ({active, url})
+  onPresenterLiveviewUpdate: (callback) => {
+    const subscription = (event, data) => callback(data);
+    ipcRenderer.on('presenter-liveview-update', subscription);
+    return () => {
+      ipcRenderer.removeListener('presenter-liveview-update', subscription);
+    };
+  },
+
   // For the presenter window: listen for countdown updates
   onPresenterCountdownUpdate: (callback) => {
     const subscription = (event, value) => callback(value);
@@ -383,6 +392,10 @@ contextBridge.exposeInMainWorld('electron', {
     recordStart: () => ipcRenderer.send('camera-command', 'camera-record-start'),
     recordStop: () => ipcRenderer.send('camera-command', 'camera-record-stop'),
     toggle: () => ipcRenderer.send('camera-command', 'camera-record-toggle'),
+
+    // Live view (framing check) — feed served as MJPEG at /liveview.
+    liveviewToggle: () => ipcRenderer.send('camera-command', 'camera-liveview-toggle'),
+    liveviewStop: () => ipcRenderer.send('camera-command', 'camera-liveview-stop'),
 
     // Pull the current status snapshot.
     getStatus: () => ipcRenderer.invoke('camera-get-status'),

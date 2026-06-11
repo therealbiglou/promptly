@@ -34,7 +34,14 @@ let latestPluginState = { isPlaying: false, speed: 1.5, chapterIndex: 0, totalCh
 
 // Camera control (Lumix S5 II over USB via the bridge subprocess)
 let cameraManager = null;
-let latestCameraStatus = { available: false, connected: false, model: null, recording: false };
+let latestCameraStatus = { available: false, connected: false, model: null, recording: false, liveview: false };
+
+// Camera live-view frame relay: bridge -> localhost TCP -> Express MJPEG (/liveview)
+const CAMERA_FRAME_PORT = 3002;
+const MJPEG_BOUNDARY = 'promptlyframe';
+let cameraFrameServer = null;
+let latestLiveFrame = null;
+const mjpegClients = new Set();
 
 // Path for storing persistent data
 const userDataPath = app.getPath('userData');
@@ -268,8 +275,12 @@ function createPresenterWindow() {
     console.log('Presenter window loaded successfully');
     // Ensure background is transparent after load
     presenterWindow.setBackgroundColor('#00000000');
-    // Sync the REC tally in case the presenter opened mid-recording.
+    // Sync the REC tally + live-view feed in case the presenter opened mid-state.
     presenterWindow.webContents.send('presenter-recording-update', latestCameraStatus.recording);
+    presenterWindow.webContents.send('presenter-liveview-update', {
+      active: latestCameraStatus.liveview,
+      url: liveviewUrl()
+    });
   });
 
   // OPEN DEVTOOLS FOR DEBUGGING (uncomment if needed)
@@ -952,6 +963,15 @@ function startRemoteServer(opts) {
           .rec-button:disabled .icon { color: #6b7280; }
           @keyframes recpulse { 0%,100% { opacity: 1; } 50% { opacity: 0.65; } }
 
+          .live-button {
+            background: #374151;
+            color: white;
+            border: 2px solid #3b82f6;
+          }
+          .live-button .icon { color: #3b82f6; }
+          .live-button.active { background: #3b82f6; border-color: #3b82f6; }
+          .live-button.active .icon { color: white; }
+
           .speed-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
           .speed-controls button {
             background: #6366f1;
@@ -1111,6 +1131,11 @@ function startRemoteServer(opts) {
             <span id="rec-label">REC</span>
           </button>
 
+          <button class="live-button" id="live-button" onclick="sendCommand('camera-liveview-toggle')" style="display:none;">
+            <span class="icon">◉</span>
+            <span id="live-label">LIVE</span>
+          </button>
+
           <div class="speed-controls">
             <button onclick="sendCommand('speed-up', currentSpeedIncrement)">
               <span class="icon">▲</span>
@@ -1260,6 +1285,7 @@ function startRemoteServer(opts) {
               }
               applyCurrentChapter(state.currentChapterIndex);
               updateRecButton(state.camera);
+              updateLiveButton(state.camera);
             } catch (error) {
               console.error('Failed to fetch state:', error);
             }
@@ -1279,6 +1305,22 @@ function startRemoteServer(opts) {
             } else {
               btn.classList.remove('recording');
               if (label) label.textContent = camera.connected ? 'REC' : 'NO CAM';
+            }
+          }
+
+          // Reflect live-view state on the LIVE button (toggle only — no feed on mobile).
+          function updateLiveButton(camera) {
+            const btn = document.getElementById('live-button');
+            const label = document.getElementById('live-label');
+            if (!btn) return;
+            if (!camera || !camera.available || !camera.connected) { btn.style.display = 'none'; return; }
+            btn.style.display = 'flex';
+            if (camera.liveview) {
+              btn.classList.add('active');
+              if (label) label.textContent = 'LIVE ON';
+            } else {
+              btn.classList.remove('active');
+              if (label) label.textContent = 'LIVE';
             }
           }
 
@@ -1497,6 +1539,20 @@ function startRemoteServer(opts) {
     }
   });
 
+  // Live-view MJPEG stream (multipart/x-mixed-replace). Consumed by the operator
+  // preview, the presenter window, and anything else that wants the camera feed.
+  appExpress.get('/liveview', (req, res) => {
+    res.writeHead(200, {
+      'Content-Type': 'multipart/x-mixed-replace; boundary=' + MJPEG_BOUNDARY,
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Connection': 'close'
+    });
+    mjpegClients.add(res);
+    if (latestLiveFrame) writeMjpegFrame(res, latestLiveFrame);
+    req.on('close', () => { mjpegClients.delete(res); });
+  });
+
   // Handle commands from mobile
   appExpress.post('/command', (req, res) => {
     const { command, value } = req.body;
@@ -1707,17 +1763,63 @@ function broadcastCameraStatus() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('camera-status', latestCameraStatus);
   }
-  // Drive the presenter window's red REC tally.
+  // Drive the presenter window's red REC tally and live-view feed.
   if (presenterWindow && !presenterWindow.isDestroyed()) {
     presenterWindow.webContents.send('presenter-recording-update', latestCameraStatus.recording);
+    presenterWindow.webContents.send('presenter-liveview-update', {
+      active: latestCameraStatus.liveview,
+      url: liveviewUrl()
+    });
   }
-  // Keep the Logi plugin state in sync so devices can show/announce REC state.
+  // Keep the Logi plugin state in sync so devices can show/announce REC + live-view state.
   latestPluginState = {
     ...latestPluginState,
     isRecording: latestCameraStatus.recording,
-    cameraConnected: latestCameraStatus.connected
+    cameraConnected: latestCameraStatus.connected,
+    liveview: latestCameraStatus.liveview
   };
   broadcastPluginState();
+}
+
+function liveviewUrl() {
+  return 'http://127.0.0.1:' + remoteServerPort + '/liveview';
+}
+
+function writeMjpegFrame(res, frame) {
+  try {
+    res.write('--' + MJPEG_BOUNDARY + '\r\nContent-Type: image/jpeg\r\nContent-Length: ' + frame.length + '\r\n\r\n');
+    res.write(frame);
+    res.write('\r\n');
+  } catch (_) {}
+}
+
+function onLiveFrame(frame) {
+  latestLiveFrame = frame;
+  for (const res of mjpegClients) writeMjpegFrame(res, frame);
+}
+
+// Localhost TCP server the bridge streams length-prefixed JPEG frames to.
+function ensureFrameServer() {
+  if (cameraFrameServer) return CAMERA_FRAME_PORT;
+  const net = require('net');
+  cameraFrameServer = net.createServer((socket) => {
+    let buf = Buffer.alloc(0);
+    socket.on('data', (chunk) => {
+      buf = Buffer.concat([buf, chunk]);
+      while (buf.length >= 4) {
+        const len = buf.readUInt32BE(0);
+        if (buf.length < 4 + len) break;
+        onLiveFrame(buf.subarray(4, 4 + len));
+        buf = buf.subarray(4 + len);
+      }
+    });
+    socket.on('error', () => {});
+  });
+  cameraFrameServer.on('error', (err) => console.error('[camera] frame server error:', err && err.message));
+  cameraFrameServer.listen(CAMERA_FRAME_PORT, '127.0.0.1', () => {
+    console.log('[camera] frame server listening on 127.0.0.1:' + CAMERA_FRAME_PORT);
+  });
+  return CAMERA_FRAME_PORT;
 }
 
 function startCameraManager() {
@@ -1752,6 +1854,13 @@ function handleCameraCommand(name) {
     case 'camera-record-toggle': cameraManager.toggleRecord(); return true;
     case 'camera-record-start': cameraManager.recordStart(); return true;
     case 'camera-record-stop': cameraManager.recordStop(); return true;
+    case 'camera-liveview-toggle':
+      if (cameraManager.getStatus().liveview) cameraManager.liveviewStop();
+      else cameraManager.liveviewStart(ensureFrameServer());
+      return true;
+    case 'camera-liveview-stop':
+      if (cameraManager.getStatus().liveview) cameraManager.liveviewStop();
+      return true;
     default: return false;
   }
 }
@@ -1991,6 +2100,7 @@ ipcMain.handle('check-for-updates-now', async () => {
 app.on('before-quit', () => {
   stopCloudflaredTunnel();
   if (cameraManager) { try { cameraManager.stop(); } catch {} cameraManager = null; }
+  if (cameraFrameServer) { try { cameraFrameServer.close(); } catch {} cameraFrameServer = null; }
 });
 
 app.on('window-all-closed', () => {

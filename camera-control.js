@@ -31,7 +31,7 @@ class CameraManager {
     this._backoffIndex = 0;
     this._respawnTimer = null;
 
-    this._state = { available: false, connected: false, model: null, recording: false };
+    this._state = { available: false, connected: false, model: null, recording: false, liveview: false };
   }
 
   getStatus() {
@@ -133,6 +133,9 @@ class CameraManager {
       case 'recording':
         this._setState({ recording: !!msg.value });
         break;
+      case 'liveview':
+        this._setState({ liveview: !!msg.value });
+        break;
       case 'error':
         this._log('camera bridge error: ' + msg.message);
         this._onError(msg.message || 'Camera error');
@@ -164,6 +167,15 @@ class CameraManager {
   toggleRecord() {
     return this._state.recording ? this.recordStop() : this.recordStart();
   }
+
+  // Live view: the bridge streams JPEG frames to Node's frame TCP server on framePort.
+  liveviewStart(framePort) { return this._writeLine({ cmd: 'liveview-start', framePort: framePort }); }
+  liveviewStop() { return this._writeLine({ cmd: 'liveview-stop' }); }
+  toggleLiveview(framePort) {
+    return this._state.liveview ? this.liveviewStop() : this.liveviewStart(framePort);
+  }
+
+  get liveview() { return this._state.liveview; }
 }
 
 module.exports = { CameraManager, DEFAULT_BACKOFF_MS };
