@@ -268,6 +268,8 @@ function createPresenterWindow() {
     console.log('Presenter window loaded successfully');
     // Ensure background is transparent after load
     presenterWindow.setBackgroundColor('#00000000');
+    // Sync the REC tally in case the presenter opened mid-recording.
+    presenterWindow.webContents.send('presenter-recording-update', latestCameraStatus.recording);
   });
 
   // OPEN DEVTOOLS FOR DEBUGGING (uncomment if needed)
@@ -1704,6 +1706,10 @@ function resolveCameraBridge() {
 function broadcastCameraStatus() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('camera-status', latestCameraStatus);
+  }
+  // Drive the presenter window's red REC tally.
+  if (presenterWindow && !presenterWindow.isDestroyed()) {
+    presenterWindow.webContents.send('presenter-recording-update', latestCameraStatus.recording);
   }
   // Keep the Logi plugin state in sync so devices can show/announce REC state.
   latestPluginState = {

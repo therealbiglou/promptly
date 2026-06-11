@@ -68,6 +68,15 @@ contextBridge.exposeInMainWorld('electron', {
     return () => ipcRenderer.removeListener('logi-plugin-status', subscription);
   },
 
+  // For the presenter window: listen for recording-state updates (red REC tally)
+  onPresenterRecordingUpdate: (callback) => {
+    const subscription = (event, recording) => callback(recording);
+    ipcRenderer.on('presenter-recording-update', subscription);
+    return () => {
+      ipcRenderer.removeListener('presenter-recording-update', subscription);
+    };
+  },
+
   // For the presenter window: listen for countdown updates
   onPresenterCountdownUpdate: (callback) => {
     const subscription = (event, value) => callback(value);

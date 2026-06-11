@@ -6059,6 +6059,12 @@ export default function App() {
                 <AlertCircle size={14} /> Open the presenter window to use this mode
               </div>
             )}
+            {cameraStatus.recording && (
+              <div className="absolute top-2 right-3 z-30 bg-black/55 px-2.5 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 pointer-events-none">
+                <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+                <span className="text-white tracking-wider">REC</span>
+              </div>
+            )}
             <div key="preview-content" className="h-full relative z-10">
               {renderOperatorPreview()}
             </div>

@@ -144,6 +144,37 @@
     #timer-overlay.mode-speed { padding: 18px 26px; }
     #timer-overlay.mode-speed .speed-indicator { margin-top: 0; }
     #timer-overlay.mode-speed .speed-value { font-size: 56px; }
+
+    /* Recording indicator — top-center so it never collides with the cornered timer */
+    #rec-indicator {
+      position: fixed;
+      top: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: none;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      border-radius: 999px;
+      background: rgba(0, 0, 0, 0.55);
+      z-index: 41;
+    }
+    #rec-indicator.recording { display: flex; }
+    #rec-indicator .rec-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #ef4444;
+      animation: recpulse 1.2s ease-in-out infinite;
+    }
+    #rec-indicator .rec-text {
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+    }
+    @keyframes recpulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
     
     .timer-flex {
       display: flex;
@@ -353,6 +384,9 @@
 
     <!-- Delayed-start countdown overlay -->
     <div id="countdown-overlay"></div>
+
+    <!-- Recording indicator -->
+    <div id="rec-indicator"><span class="rec-dot"></span><span class="rec-text">REC</span></div>
 
     <div id="timer-overlay">
       <div class="timer-flex">
@@ -808,6 +842,14 @@
 		window.electron.onPresenterTimerUpdate((p) => {
 		  if (!p) return;
 		  updateProgressDisplay(p.scrollProgress, p.scrollSpeed, p.elapsedTime, p.estimatedDuration);
+		});
+	  }
+
+	  // Recording indicator (mirrors the camera record state)
+	  if (window.electron && window.electron.onPresenterRecordingUpdate) {
+		window.electron.onPresenterRecordingUpdate((recording) => {
+		  const el = document.getElementById('rec-indicator');
+		  if (el) el.classList.toggle('recording', !!recording);
 		});
 	  }
 
