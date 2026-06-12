@@ -1851,6 +1851,7 @@ function startCameraManager() {
 function handleCameraCommand(name) {
   if (!cameraManager) return false;
   switch (name) {
+    case 'camera-connect': cameraManager.connect(); return true;
     case 'camera-record-toggle': cameraManager.toggleRecord(); return true;
     case 'camera-record-start': cameraManager.recordStart(); return true;
     case 'camera-record-stop': cameraManager.recordStop(); return true;

@@ -24,12 +24,14 @@ class CameraManager {
     this._log = opts.log || (() => {});
     this._autoConnect = opts.autoConnect !== false; // default: connect on ready
     this._backoff = opts.backoff || DEFAULT_BACKOFF_MS;
+    this._reconnectIntervalMs = opts.reconnectIntervalMs || 4000;
 
     this._child = null;
     this._stopped = false;
     this._buffer = '';
     this._backoffIndex = 0;
     this._respawnTimer = null;
+    this._reconnectTimer = null;
 
     this._state = { available: false, connected: false, model: null, recording: false, liveview: false };
   }
@@ -48,10 +50,24 @@ class CameraManager {
   start() {
     this._stopped = false;
     this._spawnBridge();
+    this._startReconnectPoll();
+  }
+
+  // While the bridge is up but no camera is connected, retry connect periodically
+  // so a camera plugged in AFTER launch is picked up automatically.
+  _startReconnectPoll() {
+    if (this._reconnectTimer) return;
+    this._reconnectTimer = setInterval(() => {
+      if (!this._stopped && this._state.available && !this._state.connected) {
+        this.connect();
+      }
+    }, this._reconnectIntervalMs);
+    if (this._reconnectTimer.unref) this._reconnectTimer.unref();
   }
 
   stop() {
     this._stopped = true;
+    if (this._reconnectTimer) { clearInterval(this._reconnectTimer); this._reconnectTimer = null; }
     if (this._respawnTimer) { clearTimeout(this._respawnTimer); this._respawnTimer = null; }
     if (this._child) {
       try { this._writeLine({ cmd: 'disconnect' }); } catch (_) {}
@@ -138,7 +154,10 @@ class CameraManager {
         break;
       case 'error':
         this._log('camera bridge error: ' + msg.message);
-        this._onError(msg.message || 'Camera error');
+        // While disconnected, errors are just failed (re)connect attempts from the
+        // reconnect poll — the Disconnected status already conveys that, so don't
+        // spam the UI. Surface real operational errors only once connected.
+        if (this._state.connected) this._onError(msg.message || 'Camera error');
         break;
       default:
         this._log('camera bridge unknown event: ' + line);

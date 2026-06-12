@@ -77,6 +77,7 @@ export default function App() {
   const [cameraStatus, setCameraStatus] = useState({ available: false, connected: false, model: null, recording: false, liveview: false });
   const [linkRecordingToPlayback, setLinkRecordingToPlayback] = useState(false);
   const [cameraError, setCameraError] = useState(null);
+  const recordStopTimerRef = useRef(null); // delays linked record-stop on pause
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
   const [showRemote, setShowRemote] = useState(false);
   const [remoteServerActive, setRemoteServerActive] = useState(false);
@@ -3204,12 +3205,22 @@ export default function App() {
 
   // Link-to-playback: when enabled and a camera is connected, start recording the
   // moment playback is initiated — INCLUDING the countdown lead-in, so the take
-  // captures before the presenter starts speaking — and stop when it pauses/ends.
+  // captures before the presenter starts speaking. On pause/stop, delay the
+  // record-stop by 2s so a quick pause/resume keeps rolling and we capture a tail.
   // Watching (isPlaying || isCountingDown) covers every trigger path uniformly.
   useEffect(() => {
     if (!linkRecordingToPlayback || !window.electron?.camera || !cameraStatus.connected) return;
-    if (isPlaying || isCountingDown) window.electron.camera.recordStart();
-    else window.electron.camera.recordStop();
+    const shouldRecord = isPlaying || isCountingDown;
+    // Any state change cancels a pending delayed stop first.
+    if (recordStopTimerRef.current) { clearTimeout(recordStopTimerRef.current); recordStopTimerRef.current = null; }
+    if (shouldRecord) {
+      window.electron.camera.recordStart();
+    } else {
+      recordStopTimerRef.current = setTimeout(() => {
+        recordStopTimerRef.current = null;
+        if (window.electron?.camera) window.electron.camera.recordStop();
+      }, 2000);
+    }
   }, [isPlaying, isCountingDown, linkRecordingToPlayback, cameraStatus.connected]);
 
   // Keep refs in sync with state so all togglePlayPause callers read the latest values.
@@ -5407,7 +5418,19 @@ export default function App() {
                               : cameraStatus.connected ? `Connected: ${cameraStatus.model || 'camera'}`
                               : 'Disconnected'}
                           </span>
+                          {!cameraStatus.connected && (
+                            <button
+                              onClick={() => window.electron?.camera?.refresh()}
+                              className="ml-1 px-2 py-0.5 text-xs bg-gray-600 hover:bg-gray-500 rounded"
+                              title="Retry connecting to the camera"
+                            >
+                              Refresh
+                            </button>
+                          )}
                         </div>
+                        {!cameraStatus.connected && (
+                          <div className="text-xs text-gray-400 mt-1">Auto-detects a camera connected in [PC(Tether)] mode (retries every few seconds).</div>
+                        )}
                         {cameraError && <div className="text-xs text-red-400 mt-2">{cameraError}</div>}
                       </div>
                       <div>

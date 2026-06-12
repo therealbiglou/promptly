@@ -397,6 +397,9 @@ contextBridge.exposeInMainWorld('electron', {
     liveviewToggle: () => ipcRenderer.send('camera-command', 'camera-liveview-toggle'),
     liveviewStop: () => ipcRenderer.send('camera-command', 'camera-liveview-stop'),
 
+    // Manually retry connecting to the camera (e.g. plugged in after launch).
+    refresh: () => ipcRenderer.send('camera-command', 'camera-connect'),
+
     // Pull the current status snapshot.
     getStatus: () => ipcRenderer.invoke('camera-get-status'),
 

@@ -142,6 +142,31 @@ test('bridge exit marks unavailable (sync part)', () => {
   }, 20);
 });
 
+test('reconnect poll retries connect while available but disconnected', () => {
+  const h = makeManager({ reconnectIntervalMs: 15 });
+  h.mgr.start();
+  h.child().emitLine({ event: 'ready' }); // available=true, auto-connect sends connect #1
+  // Stay disconnected (no 'connected' event). The poll should retry connect.
+  setTimeout(() => {
+    try {
+      const connects = h.written().filter((m) => m.cmd === 'connect');
+      assert.ok(connects.length >= 2, 'expected >=2 connect attempts (auto + poll), got ' + connects.length);
+      // Once connected, the poll must stop retrying.
+      h.child().emitLine({ event: 'connected', model: 'DC-S5M2' });
+      const countAtConnect = h.written().filter((m) => m.cmd === 'connect').length;
+      setTimeout(() => {
+        try {
+          const after = h.written().filter((m) => m.cmd === 'connect').length;
+          assert.strictEqual(after, countAtConnect, 'poll must stop once connected');
+          h.mgr.stop();
+          passed++;
+          console.log('  ok - reconnect poll retries then stops on connect (async)');
+        } catch (err) { process.exitCode = 1; console.error('  FAIL - reconnect poll stop\n    ' + err.message); }
+      }, 40);
+    } catch (err) { process.exitCode = 1; console.error('  FAIL - reconnect poll retry\n    ' + err.message); h.mgr.stop(); }
+  }, 40);
+});
+
 // Allow the async respawn test to settle before the final report.
 setTimeout(() => {
   console.log(passed + ' assertions passed.');
