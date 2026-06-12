@@ -122,19 +122,27 @@
     #presenter-root ol { list-style: decimal; padding-left: 1.5em; margin: 0.5em 0; }
     #presenter-root li { margin: 0.2em 0; }
 
-    #timer-overlay {
+    /* Corner stack: timer/speed overlay with the REC tally just below it, both
+       pinned to the user-chosen corner. */
+    #corner-stack {
       position: fixed;
+      z-index: 40;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    #corner-stack.corner-top-left { top: 16px; left: 16px; align-items: flex-start; }
+    #corner-stack.corner-top-right { top: 16px; right: 16px; align-items: flex-end; }
+    #corner-stack.corner-bottom-left { bottom: 16px; left: 16px; align-items: flex-start; }
+    #corner-stack.corner-bottom-right { bottom: 16px; right: 16px; align-items: flex-end; }
+
+    #timer-overlay {
       background: rgba(0, 0, 0, 0.7);
       padding: 12px 16px;
       border-radius: 8px;
       border: 1px solid #4b5563;
-      z-index: 40;
       color: white;
     }
-    #timer-overlay.corner-top-left { top: 16px; left: 16px; }
-    #timer-overlay.corner-top-right { top: 16px; right: 16px; }
-    #timer-overlay.corner-bottom-left { bottom: 16px; left: 16px; }
-    #timer-overlay.corner-bottom-right { bottom: 16px; right: 16px; }
     #timer-overlay.mode-hidden { display: none; }
     /* In speed-only mode, hide everything except the speed indicator block */
     #timer-overlay.mode-speed .timer-flex,
@@ -143,21 +151,17 @@
     }
     #timer-overlay.mode-speed { padding: 18px 26px; }
     #timer-overlay.mode-speed .speed-indicator { margin-top: 0; }
-    #timer-overlay.mode-speed .speed-value { font-size: 56px; }
+    /* Speed-only mode uses the same speed-value size as full mode (base 26px). */
 
-    /* Recording indicator — top-center so it never collides with the cornered timer */
+    /* Recording indicator — pill just below the timer in the same corner; always
+       shown while recording, even when the timer is hidden. */
     #rec-indicator {
-      position: fixed;
-      top: 16px;
-      left: 50%;
-      transform: translateX(-50%);
       display: none;
       align-items: center;
       gap: 8px;
       padding: 6px 14px;
       border-radius: 999px;
       background: rgba(0, 0, 0, 0.55);
-      z-index: 41;
     }
     #rec-indicator.recording { display: flex; }
     #rec-indicator .rec-dot {
@@ -398,33 +402,35 @@
     <!-- Delayed-start countdown overlay -->
     <div id="countdown-overlay"></div>
 
-    <!-- Recording indicator -->
-    <div id="rec-indicator"><span class="rec-dot"></span><span class="rec-text">REC</span></div>
-
     <!-- Live-view camera feed -->
     <img id="liveview-img" alt="Camera live view" />
 
-    <div id="timer-overlay">
-      <div class="timer-flex">
-        <div class="timer-section">
-          <div class="timer-label">Elapsed</div>
-          <div class="timer-elapsed" id="elapsed-time">0:00</div>
+    <div id="corner-stack" class="corner-top-left">
+      <div id="timer-overlay">
+        <div class="timer-flex">
+          <div class="timer-section">
+            <div class="timer-label">Elapsed</div>
+            <div class="timer-elapsed" id="elapsed-time">0:00</div>
+          </div>
+          <div class="timer-divider">/</div>
+          <div class="timer-section">
+            <div class="timer-label">Estimated</div>
+            <div class="timer-elapsed" id="estimated-time">0:00</div>
+          </div>
         </div>
-        <div class="timer-divider">/</div>
-        <div class="timer-section">
-          <div class="timer-label">Estimated</div>
-          <div class="timer-elapsed" id="estimated-time">0:00</div>
+
+        <div class="progress-bar">
+          <div class="progress-fill" id="progress-bar" style="width: 0%;"></div>
+        </div>
+
+        <div class="speed-indicator">
+          <div class="speed-label">Speed</div>
+          <span class="speed-value"><span id="speed-display">2.0</span>x</span>
         </div>
       </div>
 
-      <div class="progress-bar">
-        <div class="progress-fill" id="progress-bar" style="width: 0%;"></div>
-      </div>
-
-      <div class="speed-indicator">
-        <div class="speed-label">Speed</div>
-        <span class="speed-value"><span id="speed-display">2.0</span>x</span>
-      </div>
+      <!-- Recording indicator — sits just below the timer in the same corner -->
+      <div id="rec-indicator"><span class="rec-dot"></span><span class="rec-text">REC</span></div>
     </div>
 
 
@@ -982,15 +988,19 @@
         crosshairV.style.height = len + 'px';
       }
 
-      // Apply timer overlay mode + corner
+      // Apply timer overlay mode (timer-overlay) + corner (corner-stack, which also
+      // carries the REC tally just below the timer).
+      const corner = data.timerCorner || 'top-left';
+      const cornerStack = document.getElementById('corner-stack');
+      if (cornerStack) {
+        cornerStack.classList.remove('corner-top-left', 'corner-top-right', 'corner-bottom-left', 'corner-bottom-right');
+        cornerStack.classList.add('corner-' + corner);
+      }
       const timerOverlay = document.getElementById('timer-overlay');
       if (timerOverlay) {
         const mode = data.timerDisplayMode || 'full';
-        const corner = data.timerCorner || 'top-left';
         timerOverlay.classList.remove('mode-full', 'mode-speed', 'mode-hidden');
         timerOverlay.classList.add('mode-' + mode);
-        timerOverlay.classList.remove('corner-top-left', 'corner-top-right', 'corner-bottom-left', 'corner-bottom-right');
-        timerOverlay.classList.add('corner-' + corner);
       }
 
       // Render chapters

@@ -175,6 +175,11 @@ export default function App() {
   const [crosshairThickness, setCrosshairThickness] = useState(1);
   const [countdownDuration, setCountdownDuration] = useState(0); // seconds; 0 = disabled
   const [countdownValue, setCountdownValue] = useState(null); // current count, or null when not active
+  // True from the moment Play is pressed (countdown start) until playback actually
+  // begins or is aborted — covers the whole lead-in (ticking + the 1s pause phase),
+  // unlike countdownValue which goes null between them. Used to start recording /
+  // stop live view BEFORE the countdown so the take captures the full lead-in.
+  const [isCountingDown, setIsCountingDown] = useState(false);
   // Timer display mode in the presenter: 'full' (timer + progress + speed), 'speed' (just speed), 'hidden'
   const [timerDisplayMode, setTimerDisplayMode] = useState('full');
   // Which corner the timer/speed overlay sits in
@@ -3075,6 +3080,7 @@ export default function App() {
 
   const cancelCountdown = () => {
     countdownActiveRef.current = false;
+    setIsCountingDown(false);
     if (countdownIntervalRef.current) {
       clearInterval(countdownIntervalRef.current);
       countdownIntervalRef.current = null;
@@ -3092,6 +3098,7 @@ export default function App() {
   const startCountdown = (onComplete) => {
     cancelCountdown();
     countdownActiveRef.current = true;
+    setIsCountingDown(true);
     let remaining = countdownDurationRef.current;
     setCountdownValue(remaining);
     if (window.electron?.updatePresenterCountdown) {
@@ -3166,12 +3173,18 @@ export default function App() {
     if (window.electron?.camera) window.electron.camera.liveviewToggle();
   };
 
-  // Auto-stop live view when playback starts — never read the script with the feed up.
+  // Once playback actually begins, the lead-in is over — clear the countdown flag.
   useEffect(() => {
-    if (isPlaying && cameraStatus.liveview && window.electron?.camera) {
+    if (isPlaying) setIsCountingDown(false);
+  }, [isPlaying]);
+
+  // Auto-stop live view the moment playback is initiated — INCLUDING the countdown
+  // lead-in, so the talent sees the script and can prepare to read during the count.
+  useEffect(() => {
+    if ((isPlaying || isCountingDown) && cameraStatus.liveview && window.electron?.camera) {
       window.electron.camera.liveviewStop();
     }
-  }, [isPlaying, cameraStatus.liveview]);
+  }, [isPlaying, isCountingDown, cameraStatus.liveview]);
 
   // Subscribe to camera status + errors from the bridge (via main process).
   useEffect(() => {
@@ -3189,14 +3202,15 @@ export default function App() {
     return () => clearTimeout(t);
   }, [cameraError]);
 
-  // Link-to-playback: when enabled and a camera is connected, start recording when
-  // playback begins and stop when it pauses/ends. Watching isPlaying covers every
-  // trigger path (button, keyboard, remote, IPC) uniformly.
+  // Link-to-playback: when enabled and a camera is connected, start recording the
+  // moment playback is initiated — INCLUDING the countdown lead-in, so the take
+  // captures before the presenter starts speaking — and stop when it pauses/ends.
+  // Watching (isPlaying || isCountingDown) covers every trigger path uniformly.
   useEffect(() => {
     if (!linkRecordingToPlayback || !window.electron?.camera || !cameraStatus.connected) return;
-    if (isPlaying) window.electron.camera.recordStart();
+    if (isPlaying || isCountingDown) window.electron.camera.recordStart();
     else window.electron.camera.recordStop();
-  }, [isPlaying, linkRecordingToPlayback, cameraStatus.connected]);
+  }, [isPlaying, isCountingDown, linkRecordingToPlayback, cameraStatus.connected]);
 
   // Keep refs in sync with state so all togglePlayPause callers read the latest values.
   useEffect(() => { countdownDurationRef.current = countdownDuration; }, [countdownDuration]);
