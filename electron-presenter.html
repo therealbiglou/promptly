@@ -870,11 +870,6 @@
 	  }
 
 	  // Live-view camera feed — matches the teleprompter flip, covers the script.
-	  let liveviewFlipH = false, liveviewFlipV = false;
-	  function applyLiveviewTransform() {
-		const img = document.getElementById('liveview-img');
-		if (img) img.style.transform = 'scaleX(' + (liveviewFlipH ? -1 : 1) + ') scaleY(' + (liveviewFlipV ? -1 : 1) + ')';
-	  }
 	  if (window.electron && window.electron.onPresenterLiveviewUpdate) {
 		window.electron.onPresenterLiveviewUpdate((data) => {
 		  const img = document.getElementById('liveview-img');
@@ -951,6 +946,14 @@
 	  }
 	});
 
+    // Live-view feed mirror state — top-level so BOTH the IPC listener and
+    // updatePresenterContent can reach it (they live in different scopes).
+    let liveviewFlipH = false, liveviewFlipV = false;
+    function applyLiveviewTransform() {
+      const img = document.getElementById('liveview-img');
+      if (img) img.style.transform = 'scaleX(' + (liveviewFlipH ? -1 : 1) + ') scaleY(' + (liveviewFlipV ? -1 : 1) + ')';
+    }
+
     function updatePresenterContent(data) {
       // Update background color
       const bgLayer = document.getElementById('background-layer');
@@ -995,9 +998,12 @@
       const transform = `scaleX(${data.flipHorizontal ? -1 : 1}) scaleY(${data.flipVertical ? -1 : 1})`;
 
       // Keep the live-view feed's mirror in sync with the teleprompter flip.
-      liveviewFlipH = !!data.flipHorizontal;
-      liveviewFlipV = !!data.flipVertical;
-      applyLiveviewTransform();
+      // Guarded: this is non-essential and must never block script rendering.
+      try {
+        liveviewFlipH = !!data.flipHorizontal;
+        liveviewFlipV = !!data.flipVertical;
+        applyLiveviewTransform();
+      } catch (e) { console.error('liveview flip sync failed', e); }
       
       let html = '';
       
