@@ -77,7 +77,6 @@ export default function App() {
   const [cameraStatus, setCameraStatus] = useState({ available: false, connected: false, model: null, recording: false, liveview: false });
   const [linkRecordingToPlayback, setLinkRecordingToPlayback] = useState(false);
   const [cameraError, setCameraError] = useState(null);
-  const recordStopTimerRef = useRef(null); // delays linked record-stop on pause
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
   const [showRemote, setShowRemote] = useState(false);
   const [remoteServerActive, setRemoteServerActive] = useState(false);
@@ -2554,6 +2553,7 @@ export default function App() {
         if (settings.crosshairLength !== undefined) setCrosshairLength(settings.crosshairLength);
         if (settings.crosshairThickness !== undefined) setCrosshairThickness(settings.crosshairThickness);
         if (settings.countdownDuration !== undefined) setCountdownDuration(settings.countdownDuration);
+        if (settings.linkRecordingToPlayback !== undefined) setLinkRecordingToPlayback(settings.linkRecordingToPlayback);
         if (settings.sidebarCollapsed !== undefined) setSidebarCollapsed(settings.sidebarCollapsed);
         if (settings.timerDisplayMode !== undefined) {
           setTimerDisplayMode(settings.timerDisplayMode);
@@ -2600,6 +2600,7 @@ export default function App() {
       crosshairLength,
       crosshairThickness,
       countdownDuration,
+      linkRecordingToPlayback,
       timerDisplayMode,
       timerCorner,
       sidebarCollapsed,
@@ -2623,6 +2624,7 @@ export default function App() {
     crosshairLength,
     crosshairThickness,
     countdownDuration,
+    linkRecordingToPlayback,
     timerDisplayMode,
     timerCorner,
     sidebarCollapsed,
@@ -3207,20 +3209,19 @@ export default function App() {
   // moment playback is initiated — INCLUDING the countdown lead-in, so the take
   // captures before the presenter starts speaking. On pause/stop, delay the
   // record-stop by 2s so a quick pause/resume keeps rolling and we capture a tail.
-  // Watching (isPlaying || isCountingDown) covers every trigger path uniformly.
+  // The 2s timer lives in this effect's closure, so React's cleanup cancels it on
+  // ANY change (resume, unlink, disconnect) and on unmount — a stale stop can't
+  // fire and cut a take. (main also stops recording if the renderer reloads/crashes.)
   useEffect(() => {
-    if (!linkRecordingToPlayback || !window.electron?.camera || !cameraStatus.connected) return;
-    const shouldRecord = isPlaying || isCountingDown;
-    // Any state change cancels a pending delayed stop first.
-    if (recordStopTimerRef.current) { clearTimeout(recordStopTimerRef.current); recordStopTimerRef.current = null; }
-    if (shouldRecord) {
+    if (!window.electron?.camera || !linkRecordingToPlayback || !cameraStatus.connected) return undefined;
+    if (isPlaying || isCountingDown) {
       window.electron.camera.recordStart();
-    } else {
-      recordStopTimerRef.current = setTimeout(() => {
-        recordStopTimerRef.current = null;
-        if (window.electron?.camera) window.electron.camera.recordStop();
-      }, 2000);
+      return undefined;
     }
+    const t = setTimeout(() => {
+      if (window.electron?.camera) window.electron.camera.recordStop();
+    }, 2000);
+    return () => clearTimeout(t);
   }, [isPlaying, isCountingDown, linkRecordingToPlayback, cameraStatus.connected]);
 
   // Keep refs in sync with state so all togglePlayPause callers read the latest values.
@@ -5403,6 +5404,7 @@ export default function App() {
                     <div className="text-xs text-gray-400">
                       Camera control unavailable — the bridge isn't running. Connect a supported Lumix
                       (S5 II) over USB in [PC(Tether)] mode; the bridge starts automatically when present.
+                      {cameraError && <div className="text-red-400 mt-2">{cameraError}</div>}
                     </div>
                   ) : (
                     <div className="grid grid-cols-2 gap-4 items-start">
@@ -6133,7 +6135,7 @@ export default function App() {
             {cameraStatus.liveview && (
               <div className="absolute inset-0 z-20 bg-black flex items-center justify-center">
                 <img
-                  src="http://127.0.0.1:3001/liveview"
+                  src={cameraStatus.liveviewUrl || 'http://127.0.0.1:3001/liveview'}
                   alt="Camera live view"
                   className="max-w-full max-h-full"
                   style={{ objectFit: 'contain' }}

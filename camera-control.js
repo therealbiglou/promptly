@@ -31,7 +31,9 @@ class CameraManager {
     this._buffer = '';
     this._backoffIndex = 0;
     this._respawnTimer = null;
-    this._reconnectTimer = null;
+    this._healthTimer = null;
+    this._everReady = false;            // bridge emitted "ready" at least once
+    this._startupErrorReported = false; // surface a start failure only once
 
     this._state = { available: false, connected: false, model: null, recording: false, liveview: false };
   }
@@ -50,31 +52,32 @@ class CameraManager {
   start() {
     this._stopped = false;
     this._spawnBridge();
-    this._startReconnectPoll();
+    this._startHealthPoll();
   }
 
-  // While the bridge is up but no camera is connected, retry connect periodically
-  // so a camera plugged in AFTER launch is picked up automatically.
-  _startReconnectPoll() {
-    if (this._reconnectTimer) return;
-    this._reconnectTimer = setInterval(() => {
-      if (!this._stopped && this._state.available && !this._state.connected) {
-        this.connect();
-      }
+  // Periodic health poll: while disconnected, retry connect so a camera plugged in
+  // AFTER launch is picked up; while connected, send a liveness ping so a camera
+  // turned off / unplugged is detected (the bridge replies with "disconnected").
+  _startHealthPoll() {
+    if (this._healthTimer) return;
+    this._healthTimer = setInterval(() => {
+      if (this._stopped || !this._state.available) return;
+      if (this._state.connected) this.sendCommand('ping');
+      else this.connect();
     }, this._reconnectIntervalMs);
-    if (this._reconnectTimer.unref) this._reconnectTimer.unref();
+    if (this._healthTimer.unref) this._healthTimer.unref();
   }
 
   stop() {
     this._stopped = true;
-    if (this._reconnectTimer) { clearInterval(this._reconnectTimer); this._reconnectTimer = null; }
+    if (this._healthTimer) { clearInterval(this._healthTimer); this._healthTimer = null; }
     if (this._respawnTimer) { clearTimeout(this._respawnTimer); this._respawnTimer = null; }
     if (this._child) {
       try { this._writeLine({ cmd: 'disconnect' }); } catch (_) {}
       try { this._child.kill(); } catch (_) {}
       this._child = null;
     }
-    this._setState({ available: false, connected: false, model: null, recording: false });
+    this._setState({ available: false, connected: false, model: null, recording: false, liveview: false });
   }
 
   _spawnBridge() {
@@ -107,7 +110,13 @@ class CameraManager {
   _onExit(code) {
     this._log('camera bridge exited (code ' + code + ')');
     this._child = null;
-    this._setState({ available: false, connected: false, model: null, recording: false });
+    this._setState({ available: false, connected: false, model: null, recording: false, liveview: false });
+    // If the bridge has never reached "ready", it failed to start (e.g. a missing
+    // runtime DLL) rather than crashing mid-session — surface that once.
+    if (!this._everReady && !this._startupErrorReported) {
+      this._startupErrorReported = true;
+      this._onError('Camera bridge failed to start (exit ' + code + ') — the camera runtime may be missing.');
+    }
     if (!this._stopped) this._scheduleRespawn();
   }
 
@@ -137,6 +146,7 @@ class CameraManager {
     switch (msg.event) {
       case 'ready':
         this._backoffIndex = 0;
+        this._everReady = true;
         this._setState({ available: true });
         if (this._autoConnect) this.connect();
         break;
@@ -144,7 +154,7 @@ class CameraManager {
         this._setState({ connected: true, model: msg.model || null });
         break;
       case 'disconnected':
-        this._setState({ connected: false, model: null, recording: false });
+        this._setState({ connected: false, model: null, recording: false, liveview: false });
         break;
       case 'recording':
         this._setState({ recording: !!msg.value });
@@ -180,7 +190,6 @@ class CameraManager {
   disconnect() { return this.sendCommand('disconnect'); }
   recordStart() { return this.sendCommand('record-start'); }
   recordStop() { return this.sendCommand('record-stop'); }
-  requestStatus() { return this.sendCommand('status'); }
 
   // Toggle based on last-confirmed recording state.
   toggleRecord() {
@@ -190,11 +199,6 @@ class CameraManager {
   // Live view: the bridge streams JPEG frames to Node's frame TCP server on framePort.
   liveviewStart(framePort) { return this._writeLine({ cmd: 'liveview-start', framePort: framePort }); }
   liveviewStop() { return this._writeLine({ cmd: 'liveview-stop' }); }
-  toggleLiveview(framePort) {
-    return this._state.liveview ? this.liveviewStop() : this.liveviewStart(framePort);
-  }
-
-  get liveview() { return this._state.liveview; }
 }
 
 module.exports = { CameraManager, DEFAULT_BACKOFF_MS };

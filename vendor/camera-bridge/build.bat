@@ -33,5 +33,20 @@ if errorlevel 1 ( echo [camera-bridge] compile failed & exit /b 1 )
 
 copy /Y "%SDK%\Lmxptpif.dll" "%HERE%Lmxptpif.dll" >nul
 del /Q "%HERE%bridge.obj" 2>nul
+
+rem Ship the VC++ runtime DLLs app-local next to the bridge so Lmxptpif.dll loads
+rem on machines WITHOUT the Visual C++ Redistributable installed. vcvars64 set
+rem VCToolsRedistDir; the CRT payload lives under x64\Microsoft.VC*.CRT.
+set "CRT="
+for /d %%d in ("%VCToolsRedistDir%x64\Microsoft.VC*.CRT") do set "CRT=%%d"
+if defined CRT (
+  for %%f in (msvcp140.dll msvcp140_1.dll msvcp140_2.dll vcruntime140.dll vcruntime140_1.dll) do (
+    if exist "%CRT%\%%f" copy /Y "%CRT%\%%f" "%HERE%%%f" >nul
+  )
+  echo [camera-bridge] Copied VC++ runtime DLLs from "%CRT%"
+) else (
+  echo [camera-bridge] WARNING: VC++ redist CRT dir not found - bridge may fail on machines without the VC runtime
+)
+
 echo [camera-bridge] Built promptly-camera-bridge.exe
 endlocal

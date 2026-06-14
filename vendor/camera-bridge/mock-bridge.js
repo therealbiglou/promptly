@@ -92,6 +92,10 @@ function handle(msg) {
       stopLiveview();
       break;
 
+    case 'ping':
+      // Liveness probe — the mock camera never vanishes on its own.
+      break;
+
     case 'status':
       emit(connected ? { event: 'connected', model: MODEL } : { event: 'disconnected' });
       emit({ event: 'recording', value: recording });

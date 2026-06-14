@@ -1,6 +1,6 @@
 {
   "name": "promptly",
-  "version": "1.0.204",
+  "version": "1.0.205",
   "description": "Promptly - Professional Teleprompter Application",
   "author": "Your Name",
   "main": "electron-main.js",
@@ -103,7 +103,7 @@
         "to": "camera-bridge",
         "filter": [
           "promptly-camera-bridge.exe",
-          "Lmxptpif.dll"
+          "*.dll"
         ]
       }
     ],

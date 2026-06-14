@@ -126,7 +126,7 @@
        pinned to the user-chosen corner. */
     #corner-stack {
       position: fixed;
-      z-index: 40;
+      z-index: 60; /* above #liveview-img (55) so the REC tally stays visible over the feed */
       display: flex;
       flex-direction: column;
       gap: 8px;
@@ -876,15 +876,23 @@
 	  }
 
 	  // Live-view camera feed — matches the teleprompter flip, covers the script.
+	  let liveviewCurrentSrc = null;
 	  if (window.electron && window.electron.onPresenterLiveviewUpdate) {
 		window.electron.onPresenterLiveviewUpdate((data) => {
 		  const img = document.getElementById('liveview-img');
 		  if (!img) return;
 		  if (data && data.active && data.url) {
 			applyLiveviewTransform();
-			img.src = data.url + '?t=' + Date.now(); // cache-bust to force a fresh MJPEG stream
+			// Only (re)open the MJPEG stream when the URL actually changes. These
+			// updates fire on EVERY camera status change (e.g. pressing REC); blindly
+			// reassigning src would tear down and reconnect the stream — a visible flash.
+			if (liveviewCurrentSrc !== data.url) {
+			  liveviewCurrentSrc = data.url;
+			  img.src = data.url + '?t=' + Date.now();
+			}
 			img.classList.add('active');
 		  } else {
+			liveviewCurrentSrc = null;
 			img.classList.remove('active');
 			img.removeAttribute('src');
 		  }

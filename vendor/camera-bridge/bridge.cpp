@@ -39,12 +39,15 @@ static std::string g_model     = "camera";
 // Node over a localhost TCP socket. One mutex serializes ALL SDK calls so the
 // frame loop and command handlers can't corrupt the PTP session.
 static std::mutex        g_sdkMutex;
+static std::mutex        g_emitMutex;   // serializes stdout writes (main + live-view thread)
 static std::atomic<bool> g_liveviewRunning{ false };
 static std::thread       g_liveviewThread;
 static SOCKET            g_frameSocket = INVALID_SOCKET;
 
 // stdout is the control channel: one JSON object per line, flushed immediately.
+// Guarded so the live-view worker thread and the main thread never interleave.
 static void emitRaw(const std::string& json) {
+    std::lock_guard<std::mutex> lk(g_emitMutex);
     std::fputs(json.c_str(), stdout);
     std::fputc('\n', stdout);
     std::fflush(stdout);
@@ -197,7 +200,10 @@ static void liveviewLoop() {
             continue;
         }
         if (jpegSize > 0 && !sendFrame(jpeg, jpegSize)) {
-            g_liveviewRunning = false; // Node closed the frame socket
+            // Node closed the frame socket. Stop and tell the manager live view
+            // ended so its state doesn't stay stuck "on" with a frozen frame.
+            g_liveviewRunning = false;
+            emitLiveview(false);
             break;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(33)); // ~30 fps cap
@@ -207,6 +213,11 @@ static void liveviewLoop() {
 
 static void doLiveviewStart(int framePort) {
     if (g_liveviewRunning.load()) { emitLiveview(true); return; }
+    // Reap a worker that self-exited (e.g. Node closed the socket) so the
+    // std::thread object is safe to reassign — assigning onto a joinable thread
+    // calls std::terminate.
+    if (g_liveviewThread.joinable()) g_liveviewThread.join();
+    if (g_frameSocket != INVALID_SOCKET) { closesocket(g_frameSocket); g_frameSocket = INVALID_SOCKET; }
     if (!g_connected)   { emitError("No camera connected"); return; }
     if (framePort <= 0) { emitError("Invalid live-view frame port"); return; }
 
@@ -228,7 +239,6 @@ static void doLiveviewStart(int framePort) {
 }
 
 static void doLiveviewStop() {
-    if (!g_liveviewRunning.load() && !g_liveviewThread.joinable()) { emitLiveview(false); return; }
     g_liveviewRunning = false;
     if (g_liveviewThread.joinable()) g_liveviewThread.join();
     { std::lock_guard<std::mutex> lk(g_sdkMutex); UINT32 e = 0; LMX_func_api_Ctrl_LiveView_Stop(&e); }
@@ -281,8 +291,69 @@ static void doStatus() {
     emitLiveview(g_liveviewRunning.load());
 }
 
-static bool has(const std::string& line, const char* token) {
-    return line.find(token) != std::string::npos;
+// Liveness probe: re-enumerate WPD; if our camera is no longer present it was
+// turned off / unplugged. Debounced (two consecutive misses) to ride out a
+// transient enumeration hiccup. Independent of session state / camera model.
+static int g_pingMisses = 0;
+static void doPing() {
+    if (!g_connected) { g_pingMisses = 0; return; }
+
+    bool enumerated = false, present = false;
+    {
+        std::lock_guard<std::mutex> lk(g_sdkMutex);
+        static LMX_CONNECT_DEVICE_INFO devInfo;
+        UINT32 e = 0;
+        if (LMX_func_api_Get_PnPDeviceInfo(&devInfo, &e) == LMX_BOOL_TRUE) {
+            enumerated = true;
+            for (UINT32 i = 0; i < devInfo.find_PnpDevice_Count; ++i) {
+                std::string tag = wideToUtf8(devInfo.find_PnpDevice_Info[i].dev_MakerName) + " " +
+                                  wideToUtf8(devInfo.find_PnpDevice_Info[i].dev_ModelName);
+                for (char& c : tag) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                if (tag.find("PANASONIC") != std::string::npos ||
+                    tag.find("LUMIX") != std::string::npos ||
+                    tag.find("DC-") != std::string::npos) { present = true; break; }
+            }
+        }
+    }
+    // Only treat a SUCCESSFUL enumeration that no longer lists the camera as a miss.
+    // A failed enumeration is inconclusive — don't disconnect a working camera over it.
+    if (!enumerated) return;
+    if (present) { g_pingMisses = 0; return; }
+    if (++g_pingMisses < 2) return;
+    g_pingMisses = 0;
+
+    // Camera gone — tear down. Stop live view OUTSIDE the SDK mutex (it joins the
+    // worker thread, which itself takes the mutex) to avoid deadlock.
+    if (g_liveviewRunning.load() || g_liveviewThread.joinable()) doLiveviewStop();
+    {
+        std::lock_guard<std::mutex> lk(g_sdkMutex);
+        UINT32 e = 0;
+        LMX_func_api_Close_Session(&e);
+        LMX_func_api_Close_Device(&e);
+    }
+    g_connected = false;
+    g_recording = false;
+    emitEvent("disconnected");
+}
+
+// Extract the string value of `key` from a flat JSON object line. Robust dispatch
+// (vs substring matching) so future commands / string params can't mis-trigger.
+static std::string extractJsonString(const std::string& line, const char* key) {
+    std::string needle = std::string("\"") + key + "\"";
+    size_t p = line.find(needle);
+    if (p == std::string::npos) return "";
+    p = line.find(':', p + needle.size());
+    if (p == std::string::npos) return "";
+    ++p;
+    while (p < line.size() && (line[p] == ' ' || line[p] == '\t')) ++p;
+    if (p >= line.size() || line[p] != '"') return "";
+    ++p;
+    std::string out;
+    while (p < line.size() && line[p] != '"') {
+        if (line[p] == '\\' && p + 1 < line.size()) ++p;
+        out += line[p++];
+    }
+    return out;
 }
 
 static int parseFramePort(const std::string& line) {
@@ -303,16 +374,17 @@ int main() {
     std::string line;
     while (std::getline(std::cin, line)) {
         if (line.empty()) continue;
-        // The manager controls the exact wire format ({"cmd":"..."}); match the
-        // command token. Check the longer/compound tokens before shorter ones.
-        if      (has(line, "\"liveview-start\"")) doLiveviewStart(parseFramePort(line));
-        else if (has(line, "\"liveview-stop\""))  doLiveviewStop();
-        else if (has(line, "\"record-start\""))   doRecordStart();
-        else if (has(line, "\"record-stop\""))    doRecordStop();
-        else if (has(line, "\"connect\""))        doConnect();
-        else if (has(line, "\"disconnect\""))     doDisconnect();
-        else if (has(line, "\"status\""))         doStatus();
-        else emitError("Unknown command");
+        // Dispatch on the exact "cmd" value (robust to string params / new commands).
+        const std::string cmd = extractJsonString(line, "cmd");
+        if      (cmd == "liveview-start") doLiveviewStart(parseFramePort(line));
+        else if (cmd == "liveview-stop")  doLiveviewStop();
+        else if (cmd == "record-start")   doRecordStart();
+        else if (cmd == "record-stop")    doRecordStop();
+        else if (cmd == "connect")        doConnect();
+        else if (cmd == "disconnect")     doDisconnect();
+        else if (cmd == "status")         doStatus();
+        else if (cmd == "ping")           doPing();
+        else emitError("Unknown command: " + cmd);
     }
 
     doDisconnect();

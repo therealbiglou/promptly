@@ -38,5 +38,5 @@ vendor/cloudflared/cloudflared.exe
 LumixRemoteControlLibraryBeta1.00/
 # Native camera bridge build outputs (exe + the SDK runtime DLL copied beside it)
 vendor/camera-bridge/promptly-camera-bridge.exe
-vendor/camera-bridge/Lmxptpif.dll
+vendor/camera-bridge/*.dll
 vendor/camera-bridge/*.obj

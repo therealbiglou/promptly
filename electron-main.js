@@ -153,6 +153,16 @@ function createMainWindow() {
 
   mainWindow.webContents.on('did-finish-load', () => {
     console.log('[MAIN] Main window finished loading');
+    // A reload resets the renderer's recording policy (link-to-playback, the 2s
+    // stop timer). Stop any active recording so a linked take can't keep rolling
+    // unmanaged. (On the first load nothing is recording / cameraManager is null.)
+    if (cameraManager && cameraManager.getStatus().recording) cameraManager.recordStop();
+  });
+
+  // If the renderer crashes while recording, stop the camera — the policy that
+  // would otherwise stop it died with the renderer.
+  mainWindow.webContents.on('render-process-gone', () => {
+    if (cameraManager && cameraManager.getStatus().recording) cameraManager.recordStop();
   });
 
   // Show window when ready to prevent white flash
@@ -276,11 +286,7 @@ function createPresenterWindow() {
     // Ensure background is transparent after load
     presenterWindow.setBackgroundColor('#00000000');
     // Sync the REC tally + live-view feed in case the presenter opened mid-state.
-    presenterWindow.webContents.send('presenter-recording-update', latestCameraStatus.recording);
-    presenterWindow.webContents.send('presenter-liveview-update', {
-      active: latestCameraStatus.liveview,
-      url: liveviewUrl()
-    });
+    sendPresenterCameraState();
   });
 
   // OPEN DEVTOOLS FOR DEBUGGING (uncomment if needed)
@@ -1591,6 +1597,12 @@ function startRemoteServer(opts) {
       }
     });
 
+    // Async bind failures (e.g. port already in use) surface as an 'error' event,
+    // not the try/catch — handle it so it can't crash the main process.
+    remoteServer.on('error', (err) => {
+      console.error('[remote-server] listen error:', err && err.message);
+    });
+
     // WebSocket endpoint at /plugin for the Logi Plugin Service plugin.
     // Plugin connects, sends { type: "command", name, value? } frames.
     // Server pushes { type: "state", ... } snapshots whenever Promptly state changes.
@@ -1613,9 +1625,13 @@ function startRemoteServer(opts) {
         let msg;
         try { msg = JSON.parse(data.toString()); } catch { return; }
         if (msg && msg.type === 'command' && msg.name) {
-          // Camera commands are handled in the main process; everything else is
-          // forwarded to the renderer as a remote-command.
-          if (handleCameraCommand(msg.name)) return;
+          // Camera commands are handled in the main process (same as the mobile
+          // /command path); everything else is forwarded to the renderer. Intercept
+          // ALL camera-* names so behavior is uniform whether or not a bridge exists.
+          if (typeof msg.name === 'string' && msg.name.startsWith('camera-')) {
+            handleCameraCommand(msg.name);
+            return;
+          }
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('remote-command', { command: msg.name, value: msg.value });
           }
@@ -1759,18 +1775,33 @@ function resolveCameraBridge() {
   return null;
 }
 
+function liveviewUrl() {
+  return 'http://127.0.0.1:' + remoteServerPort + '/liveview';
+}
+
+// The renderer needs the MJPEG URL too — derive it from the authoritative
+// remoteServerPort here rather than hardcoding host:port in the renderer.
+function cameraStatusForRenderer() {
+  return { ...latestCameraStatus, liveviewUrl: liveviewUrl() };
+}
+
+// Push the presenter window's REC tally + live-view feed. Shared by status
+// broadcasts and the presenter's did-finish-load (so a window opened mid-state
+// is correct) — one place to build the payload.
+function sendPresenterCameraState() {
+  if (!presenterWindow || presenterWindow.isDestroyed()) return;
+  presenterWindow.webContents.send('presenter-recording-update', latestCameraStatus.recording);
+  presenterWindow.webContents.send('presenter-liveview-update', {
+    active: latestCameraStatus.liveview,
+    url: liveviewUrl()
+  });
+}
+
 function broadcastCameraStatus() {
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('camera-status', latestCameraStatus);
+    mainWindow.webContents.send('camera-status', cameraStatusForRenderer());
   }
-  // Drive the presenter window's red REC tally and live-view feed.
-  if (presenterWindow && !presenterWindow.isDestroyed()) {
-    presenterWindow.webContents.send('presenter-recording-update', latestCameraStatus.recording);
-    presenterWindow.webContents.send('presenter-liveview-update', {
-      active: latestCameraStatus.liveview,
-      url: liveviewUrl()
-    });
-  }
+  sendPresenterCameraState();
   // Keep the Logi plugin state in sync so devices can show/announce REC + live-view state.
   latestPluginState = {
     ...latestPluginState,
@@ -1779,17 +1810,20 @@ function broadcastCameraStatus() {
     liveview: latestCameraStatus.liveview
   };
   broadcastPluginState();
-}
-
-function liveviewUrl() {
-  return 'http://127.0.0.1:' + remoteServerPort + '/liveview';
+  // Drop the retained frame once live view ends so the next session can't show a
+  // stale frame from the previous one.
+  if (!latestCameraStatus.liveview) latestLiveFrame = null;
 }
 
 function writeMjpegFrame(res, frame) {
+  if (res._backedUp) return; // slow client — drop frames until it drains (latest-wins)
   try {
     res.write('--' + MJPEG_BOUNDARY + '\r\nContent-Type: image/jpeg\r\nContent-Length: ' + frame.length + '\r\n\r\n');
     res.write(frame);
-    res.write('\r\n');
+    if (res.write('\r\n') === false) {
+      res._backedUp = true;
+      res.once('drain', () => { res._backedUp = false; });
+    }
   } catch (_) {}
 }
 
@@ -1860,7 +1894,7 @@ function handleCameraCommand(name) {
       else cameraManager.liveviewStart(ensureFrameServer());
       return true;
     case 'camera-liveview-stop':
-      if (cameraManager.getStatus().liveview) cameraManager.liveviewStop();
+      cameraManager.liveviewStop(); // idempotent in the bridge; always honor a stop
       return true;
     default: return false;
   }
@@ -1868,7 +1902,7 @@ function handleCameraCommand(name) {
 
 // IPC from the main React UI
 ipcMain.on('camera-command', (event, name) => { handleCameraCommand(name); });
-ipcMain.handle('camera-get-status', () => latestCameraStatus);
+ipcMain.handle('camera-get-status', () => cameraStatusForRenderer());
 
 // Ensure GPU is enabled for transparency (especially on Windows)
 // These command line switches MUST be set before app.whenReady()
