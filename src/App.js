@@ -3,6 +3,16 @@ import { Play, Pause, Settings, FileText, Download, Upload, Edit2, ChevronLeft, 
 import QRCode from 'qrcode';
 import { jsPDF } from 'jspdf';
 
+// One-time repair: older builds could persist a shortcut whose `label` (shown)
+// drifted from its `key` (matched), so a key behaved as the opposite arrow.
+// Restore `key` from the label for the keys we can map back. Module-scope (pure).
+const LABEL_TO_KEY = { '↑': 'ArrowUp', '↓': 'ArrowDown', '←': 'ArrowLeft', '→': 'ArrowRight', 'Space': ' ', 'Esc': 'Escape' };
+const repairShortcut = (s) => {
+  if (!s || !s.label) return s;
+  const intended = LABEL_TO_KEY[s.label];
+  return (intended && s.key !== intended) ? { ...s, key: intended } : s;
+};
+
 export default function App() {
   // Default tutorial script for first-time users
   const getTutorialScript = () => ({
@@ -282,17 +292,29 @@ export default function App() {
   };
 
   // Keyboard shortcut helper functions
+  // Human label derived from the actual `key` — the same field the handler matches
+  // on — so the displayed shortcut can never drift from what's bound.
+  const keyToLabel = (key) => {
+    if (!key) return '';
+    switch (key) {
+      case ' ': return 'Space';
+      case 'ArrowUp': return '↑';
+      case 'ArrowDown': return '↓';
+      case 'ArrowLeft': return '←';
+      case 'ArrowRight': return '→';
+      case 'Escape': return 'Esc';
+      default: return key.length === 1 ? key.toUpperCase() : key;
+    }
+  };
+
   const formatShortcut = (shortcut) => {
     if (!shortcut) return '';
     const parts = [];
     if (shortcut.ctrl) parts.push('Ctrl');
     if (shortcut.shift) parts.push('Shift');
     if (shortcut.alt) parts.push('Alt');
-    if (shortcut.label) {
-      parts.push(shortcut.label);
-    } else if (shortcut.key) {
-      parts.push(shortcut.key === ' ' ? 'Space' : shortcut.key);
-    }
+    const k = keyToLabel(shortcut.key); // derive from key, NEVER the stored label
+    if (k) parts.push(k);
     return parts.join('+');
   };
 
@@ -340,6 +362,12 @@ export default function App() {
   };
 
   const cancelEditingShortcut = () => {
+    setEditingShortcut(null);
+    setCapturedKeys(null);
+  };
+
+  const resetShortcutsToDefaults = () => {
+    setKeyboardShortcuts(defaultShortcuts);
     setEditingShortcut(null);
     setCapturedKeys(null);
   };
@@ -2575,8 +2603,13 @@ export default function App() {
         if (settings.scrollSpeed !== undefined) setScrollSpeed(settings.scrollSpeed);
         if (settings.speedIncrement !== undefined) setSpeedIncrement(settings.speedIncrement);
         if (settings.keyboardShortcuts !== undefined) {
-          // Merge saved shortcuts with defaults to ensure new shortcuts are available
-          setKeyboardShortcuts(prev => ({ ...prev, ...settings.keyboardShortcuts }));
+          // Merge saved shortcuts with defaults (so new actions appear) and repair
+          // any saved entry whose key drifted from its label.
+          const repaired = {};
+          Object.keys(settings.keyboardShortcuts).forEach(action => {
+            repaired[action] = (settings.keyboardShortcuts[action] || []).map(repairShortcut);
+          });
+          setKeyboardShortcuts(prev => ({ ...prev, ...repaired }));
         }
       }
     } catch (error) {
@@ -5712,6 +5745,15 @@ export default function App() {
 
             {showKeyboardShortcuts && (
               <div className="p-4 bg-gray-700 rounded-b-lg rounded-tr-lg mb-4 overflow-y-auto max-h-[60vh] space-y-3">
+                <div className="flex justify-end">
+                  <button
+                    onClick={resetShortcutsToDefaults}
+                    className="text-xs px-2 py-1 bg-gray-600 hover:bg-gray-500 rounded"
+                    title="Reset all keyboard shortcuts to their defaults"
+                  >
+                    Reset to defaults
+                  </button>
+                </div>
                 {Object.entries({
                   playPause: 'Play/Pause',
                   speedUp: 'Speed Up',
