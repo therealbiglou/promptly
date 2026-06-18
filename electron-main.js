@@ -12,6 +12,7 @@ const { spawn } = require('child_process');
 const { autoUpdater } = require('electron-updater');
 const { WebSocketServer } = require('ws');
 const { CameraManager } = require('./camera-control');
+const { InputBridgeManager } = require('./input-control');
 // Note: pdf-parse is lazy-loaded only when needed to avoid DOMMatrix errors
 
 // Note: GPU acceleration is REQUIRED for transparent windows on Windows
@@ -1904,6 +1905,60 @@ function handleCameraCommand(name) {
 ipcMain.on('camera-command', (event, name) => { handleCameraCommand(name); });
 ipcMain.handle('camera-get-status', () => cameraStatusForRenderer());
 
+// ============================================
+// Remote Button (device-filtered input trigger via the Raw Input helper)
+// ============================================
+let inputBridge = null;
+let remoteButtonCommand = 'play-pause'; // what the bound device's click fires
+
+function resolveInputBridge() {
+  const dir = isDev
+    ? path.join(__dirname, 'vendor', 'input-bridge')
+    : path.join(process.resourcesPath, 'input-bridge');
+  const exePath = path.join(dir, 'promptly-input-bridge.exe');
+  if (fs.existsSync(exePath)) return { command: exePath, args: [], env: null, kind: 'native' };
+  const mockPath = path.join(dir, 'mock-input-bridge.js');
+  if (fs.existsSync(mockPath)) {
+    return { command: process.execPath, args: [mockPath], env: { ELECTRON_RUN_AS_NODE: '1' }, kind: 'mock' };
+  }
+  return null;
+}
+
+function startInputBridge() {
+  if (inputBridge) return;
+  const b = resolveInputBridge();
+  if (!b) { console.warn('[input] no helper found — remote button disabled'); return; }
+  console.log('[input] starting ' + b.kind + ' helper');
+  inputBridge = new InputBridgeManager({
+    spawn: (cmd, args, opts) => spawn(cmd, args, {
+      ...opts, windowsHide: true,
+      env: b.env ? { ...process.env, ...b.env } : process.env
+    }),
+    command: b.command,
+    args: b.args,
+    log: (m) => console.log('[input] ' + m),
+    onStatus: (s) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('remote-input-status', s); },
+    onBound: (id) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('remote-input-bound', id); },
+    onError: (msg) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('remote-input-error', msg); },
+    onTrigger: () => {
+      // Fire the configured command — camera commands route to the camera manager,
+      // everything else goes through the existing remote-command handler in the renderer.
+      const cmd = remoteButtonCommand;
+      if (typeof cmd === 'string' && cmd.startsWith('camera-')) {
+        handleCameraCommand(cmd);
+      } else if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('remote-command', { command: cmd });
+      }
+    }
+  });
+  inputBridge.start();
+}
+
+ipcMain.on('remote-input-bind', () => { if (inputBridge) inputBridge.bind(); });
+ipcMain.on('remote-input-set-device', (event, id) => { if (inputBridge) inputBridge.setDevice(id || null); });
+ipcMain.on('remote-input-clear', () => { if (inputBridge) inputBridge.clear(); });
+ipcMain.on('remote-input-set-command', (event, cmd) => { if (typeof cmd === 'string') remoteButtonCommand = cmd; });
+
 // Ensure GPU is enabled for transparency (especially on Windows)
 // These command line switches MUST be set before app.whenReady()
 app.commandLine.appendSwitch('enable-transparent-visuals');
@@ -1949,6 +2004,9 @@ app.whenReady().then(() => {
   // Start the camera bridge (mock until the real SDK bridge .exe is present).
   // Delayed so it doesn't compete with the main-window load.
   setTimeout(() => { startCameraManager(); }, 1500);
+
+  // Start the remote-button input helper (mock until the native .exe is present).
+  setTimeout(() => { startInputBridge(); }, 1800);
 });
 
 // ============================================================================
@@ -2136,6 +2194,7 @@ app.on('before-quit', () => {
   stopCloudflaredTunnel();
   if (cameraManager) { try { cameraManager.stop(); } catch {} cameraManager = null; }
   if (cameraFrameServer) { try { cameraFrameServer.close(); } catch {} cameraFrameServer = null; }
+  if (inputBridge) { try { inputBridge.stop(); } catch {} inputBridge = null; }
 });
 
 app.on('window-all-closed', () => {

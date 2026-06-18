@@ -40,3 +40,6 @@ LumixRemoteControlLibraryBeta1.00/
 vendor/camera-bridge/promptly-camera-bridge.exe
 vendor/camera-bridge/*.dll
 vendor/camera-bridge/*.obj
+# Native Raw Input helper build output
+vendor/input-bridge/promptly-input-bridge.exe
+vendor/input-bridge/*.obj

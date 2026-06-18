@@ -1,6 +1,6 @@
 {
   "name": "promptly",
-  "version": "1.0.205",
+  "version": "1.0.206",
   "description": "Promptly - Professional Teleprompter Application",
   "author": "Your Name",
   "main": "electron-main.js",
@@ -26,7 +26,7 @@
     "ws": "^8.20.1"
   },
   "scripts": {
-    "prebuild": "node scripts/fetch-cloudflared.js && node scripts/build-logi-plugin.js && node scripts/build-camera-bridge.js",
+    "prebuild": "node scripts/fetch-cloudflared.js && node scripts/build-logi-plugin.js && node scripts/build-camera-bridge.js && node scripts/build-input-bridge.js",
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
@@ -87,7 +87,8 @@
       "electron-main.js",
       "electron-preload.js",
       "electron-presenter.html",
-      "camera-control.js"
+      "camera-control.js",
+      "input-control.js"
     ],
     "extraResources": [
       {
@@ -104,6 +105,13 @@
         "filter": [
           "promptly-camera-bridge.exe",
           "*.dll"
+        ]
+      },
+      {
+        "from": "vendor/input-bridge",
+        "to": "input-bridge",
+        "filter": [
+          "promptly-input-bridge.exe"
         ]
       }
     ],

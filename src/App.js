@@ -77,6 +77,11 @@ export default function App() {
   const [cameraStatus, setCameraStatus] = useState({ available: false, connected: false, model: null, recording: false, liveview: false });
   const [linkRecordingToPlayback, setLinkRecordingToPlayback] = useState(false);
   const [cameraError, setCameraError] = useState(null);
+  // Remote Button (device-filtered input trigger via the Raw Input helper)
+  const [remoteButtonDeviceId, setRemoteButtonDeviceId] = useState(null);
+  const [remoteButtonCommand, setRemoteButtonCommand] = useState('play-pause');
+  const [remoteInputAvailable, setRemoteInputAvailable] = useState(false);
+  const [remoteInputBinding, setRemoteInputBinding] = useState(false);
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
   const [showRemote, setShowRemote] = useState(false);
   const [remoteServerActive, setRemoteServerActive] = useState(false);
@@ -2554,6 +2559,8 @@ export default function App() {
         if (settings.crosshairThickness !== undefined) setCrosshairThickness(settings.crosshairThickness);
         if (settings.countdownDuration !== undefined) setCountdownDuration(settings.countdownDuration);
         if (settings.linkRecordingToPlayback !== undefined) setLinkRecordingToPlayback(settings.linkRecordingToPlayback);
+        if (settings.remoteButtonDeviceId !== undefined) setRemoteButtonDeviceId(settings.remoteButtonDeviceId);
+        if (settings.remoteButtonCommand !== undefined) setRemoteButtonCommand(settings.remoteButtonCommand);
         if (settings.sidebarCollapsed !== undefined) setSidebarCollapsed(settings.sidebarCollapsed);
         if (settings.timerDisplayMode !== undefined) {
           setTimerDisplayMode(settings.timerDisplayMode);
@@ -2601,6 +2608,8 @@ export default function App() {
       crosshairThickness,
       countdownDuration,
       linkRecordingToPlayback,
+      remoteButtonDeviceId,
+      remoteButtonCommand,
       timerDisplayMode,
       timerCorner,
       sidebarCollapsed,
@@ -2625,6 +2634,8 @@ export default function App() {
     crosshairThickness,
     countdownDuration,
     linkRecordingToPlayback,
+    remoteButtonDeviceId,
+    remoteButtonCommand,
     timerDisplayMode,
     timerCorner,
     sidebarCollapsed,
@@ -3204,6 +3215,34 @@ export default function App() {
     const t = setTimeout(() => setCameraError(null), 5000);
     return () => clearTimeout(t);
   }, [cameraError]);
+
+  // Remote Button: subscribe to the input helper's status / bind result / errors.
+  useEffect(() => {
+    if (!window.electron?.remoteInput) return undefined;
+    const unsubStatus = window.electron.remoteInput.onStatus((s) => setRemoteInputAvailable(!!(s && s.available)));
+    const unsubBound = window.electron.remoteInput.onBound((id) => { setRemoteButtonDeviceId(id || null); setRemoteInputBinding(false); });
+    const unsubErr = window.electron.remoteInput.onError(() => setRemoteInputBinding(false));
+    return () => { unsubStatus && unsubStatus(); unsubBound && unsubBound(); unsubErr && unsubErr(); };
+  }, []);
+
+  // Push the bound device + chosen command to the helper whenever they change, or
+  // when the helper (re)becomes available — so a fresh/respawned helper is configured.
+  useEffect(() => {
+    if (window.electron?.remoteInput && remoteInputAvailable) window.electron.remoteInput.setDevice(remoteButtonDeviceId);
+  }, [remoteButtonDeviceId, remoteInputAvailable]);
+  useEffect(() => {
+    if (window.electron?.remoteInput && remoteInputAvailable) window.electron.remoteInput.setCommand(remoteButtonCommand);
+  }, [remoteButtonCommand, remoteInputAvailable]);
+
+  const bindRemoteButton = () => {
+    if (!window.electron?.remoteInput) return;
+    setRemoteInputBinding(true);
+    window.electron.remoteInput.bind();
+  };
+  const clearRemoteButton = () => {
+    if (window.electron?.remoteInput) window.electron.remoteInput.clear();
+    setRemoteButtonDeviceId(null);
+  };
 
   // Link-to-playback: when enabled and a camera is connected, start recording the
   // moment playback is initiated — INCLUDING the countdown lead-in, so the take
@@ -5446,6 +5485,58 @@ export default function App() {
                           Link recording to playback
                         </label>
                         <div className="text-xs text-gray-400 mt-1">Start/stop the camera automatically when the teleprompter plays/pauses.</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Remote Button */}
+                <div className="col-span-3 border-b border-gray-600 pb-4 mb-2">
+                  <h3 className="font-bold text-sm mb-3 text-purple-400 flex items-center gap-2">
+                    <Target size={16} />
+                    Remote Button
+                  </h3>
+                  {!remoteInputAvailable ? (
+                    <div className="text-xs text-gray-400">
+                      Remote-button support is unavailable — the input helper isn't running.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-4 items-start">
+                      <div>
+                        <label className="block text-sm mb-2">Bound device</label>
+                        <div className="flex items-center gap-2 text-sm">
+                          <span className={remoteButtonDeviceId ? 'text-green-400' : 'text-gray-400'}>
+                            {remoteInputBinding ? 'Press your remote now…' : (remoteButtonDeviceId ? 'Bound ✓' : 'Not bound')}
+                          </span>
+                          <button
+                            onClick={bindRemoteButton}
+                            disabled={remoteInputBinding}
+                            className="px-2 py-0.5 text-xs bg-purple-600 hover:bg-purple-700 rounded disabled:opacity-50"
+                          >
+                            {remoteButtonDeviceId ? 'Re-bind' : 'Bind'}
+                          </button>
+                          {remoteButtonDeviceId && (
+                            <button onClick={clearRemoteButton} className="px-2 py-0.5 text-xs bg-gray-600 hover:bg-gray-500 rounded">Clear</button>
+                          )}
+                        </div>
+                        <div className="text-xs text-gray-400 mt-1">Click Bind, then press your remote's button once. Only that device fires the command — your mouse is ignored. (The press still left-clicks too, so keep the cursor parked.)</div>
+                      </div>
+                      <div>
+                        <label className="block text-sm mb-2">Fires command</label>
+                        <select
+                          value={remoteButtonCommand}
+                          onChange={(e) => setRemoteButtonCommand(e.target.value)}
+                          className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-sm"
+                        >
+                          <option value="play-pause">Play / Pause</option>
+                          <option value="next-chapter">Next chapter</option>
+                          <option value="prev-chapter">Previous chapter</option>
+                          <option value="reset">Reset to start</option>
+                          <option value="speed-up">Speed up</option>
+                          <option value="speed-down">Speed down</option>
+                          <option value="camera-liveview-toggle">Toggle live view</option>
+                          <option value="camera-record-toggle">Start/Stop recording</option>
+                        </select>
                       </div>
                     </div>
                   )}

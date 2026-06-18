@@ -416,6 +416,32 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.on('camera-error', subscription);
       return () => ipcRenderer.removeListener('camera-error', subscription);
     }
+  },
+
+  // ============================================
+  // Remote Button (device-filtered input trigger)
+  // ============================================
+  remoteInput: {
+    bind: () => ipcRenderer.send('remote-input-bind'),
+    setDevice: (id) => ipcRenderer.send('remote-input-set-device', id),
+    clear: () => ipcRenderer.send('remote-input-clear'),
+    setCommand: (cmd) => ipcRenderer.send('remote-input-set-command', cmd),
+
+    onStatus: (callback) => {
+      const subscription = (event, status) => callback(status);
+      ipcRenderer.on('remote-input-status', subscription);
+      return () => ipcRenderer.removeListener('remote-input-status', subscription);
+    },
+    onBound: (callback) => {
+      const subscription = (event, id) => callback(id);
+      ipcRenderer.on('remote-input-bound', subscription);
+      return () => ipcRenderer.removeListener('remote-input-bound', subscription);
+    },
+    onError: (callback) => {
+      const subscription = (event, message) => callback(message);
+      ipcRenderer.on('remote-input-error', subscription);
+      return () => ipcRenderer.removeListener('remote-input-error', subscription);
+    }
   }
 });
 
