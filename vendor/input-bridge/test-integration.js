@@ -13,14 +13,15 @@ const mockPath = path.join(__dirname, 'mock-input-bridge.js');
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let boundId = null;
-let triggers = 0;
+const gestures = [];
 
 const mgr = new InputBridgeManager({
   spawn,
   command: process.execPath,
   args: [mockPath],
   onBound: (id) => { boundId = id; },
-  onTrigger: () => { triggers++; },
+  onGesture: (g) => { gestures.push(g); },
+  longMs: 40, doubleMs: 30, // small windows for a fast test
   log: () => {},
 });
 
@@ -34,17 +35,18 @@ const mgr = new InputBridgeManager({
   assert.strictEqual(boundId, 'MOCK-REMOTE', 'bind should report the captured device');
   assert.strictEqual(mgr.getDeviceId(), 'MOCK-REMOTE', 'manager should store the bound device');
 
-  // A click from the bound device triggers; a click from another device does not.
+  // A single click from the bound device yields a 'single' gesture...
   mgr._writeLine({ cmd: '__click', device: 'MOCK-REMOTE' });
-  await wait(80);
-  assert.strictEqual(triggers, 1, 'bound device click should trigger');
+  await wait(60);
+  assert.deepStrictEqual(gestures, ['single'], 'bound device click should yield single');
 
+  // ...and a click from another device yields nothing.
   mgr._writeLine({ cmd: '__click', device: 'SOME-OTHER-MOUSE' });
-  await wait(80);
-  assert.strictEqual(triggers, 1, 'a different device must NOT trigger');
+  await wait(60);
+  assert.deepStrictEqual(gestures, ['single'], 'a different device must NOT fire a gesture');
 
   mgr.stop();
   await wait(40);
-  console.log('INPUT INTEGRATION PASSED (bind -> ' + boundId + ', device-filtered trigger works)');
+  console.log('INPUT INTEGRATION PASSED (bind -> ' + boundId + ', device-filtered single gesture works)');
   process.exit(0);
 })().catch((e) => { console.error('INPUT INTEGRATION FAILED:', e.message); mgr.stop(); process.exit(1); });

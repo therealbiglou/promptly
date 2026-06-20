@@ -89,7 +89,10 @@ export default function App() {
   const [cameraError, setCameraError] = useState(null);
   // Remote Button (device-filtered input trigger via the Raw Input helper)
   const [remoteButtonDeviceId, setRemoteButtonDeviceId] = useState(null);
-  const [remoteButtonCommand, setRemoteButtonCommand] = useState('play-pause');
+  // The bound button fires up to three commands by gesture: single tap / double tap / long press.
+  const [remoteButtonSingle, setRemoteButtonSingle] = useState('play-pause');
+  const [remoteButtonDouble, setRemoteButtonDouble] = useState('');
+  const [remoteButtonLong, setRemoteButtonLong] = useState('');
   const [remoteInputAvailable, setRemoteInputAvailable] = useState(false);
   const [remoteInputBinding, setRemoteInputBinding] = useState(false);
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
@@ -2588,7 +2591,11 @@ export default function App() {
         if (settings.countdownDuration !== undefined) setCountdownDuration(settings.countdownDuration);
         if (settings.linkRecordingToPlayback !== undefined) setLinkRecordingToPlayback(settings.linkRecordingToPlayback);
         if (settings.remoteButtonDeviceId !== undefined) setRemoteButtonDeviceId(settings.remoteButtonDeviceId);
-        if (settings.remoteButtonCommand !== undefined) setRemoteButtonCommand(settings.remoteButtonCommand);
+        // Migrate the old single-command field onto the single-tap slot.
+        if (settings.remoteButtonSingle !== undefined) setRemoteButtonSingle(settings.remoteButtonSingle);
+        else if (settings.remoteButtonCommand !== undefined) setRemoteButtonSingle(settings.remoteButtonCommand);
+        if (settings.remoteButtonDouble !== undefined) setRemoteButtonDouble(settings.remoteButtonDouble);
+        if (settings.remoteButtonLong !== undefined) setRemoteButtonLong(settings.remoteButtonLong);
         if (settings.sidebarCollapsed !== undefined) setSidebarCollapsed(settings.sidebarCollapsed);
         if (settings.timerDisplayMode !== undefined) {
           setTimerDisplayMode(settings.timerDisplayMode);
@@ -2642,7 +2649,9 @@ export default function App() {
       countdownDuration,
       linkRecordingToPlayback,
       remoteButtonDeviceId,
-      remoteButtonCommand,
+      remoteButtonSingle,
+      remoteButtonDouble,
+      remoteButtonLong,
       timerDisplayMode,
       timerCorner,
       sidebarCollapsed,
@@ -2668,7 +2677,9 @@ export default function App() {
     countdownDuration,
     linkRecordingToPlayback,
     remoteButtonDeviceId,
-    remoteButtonCommand,
+    remoteButtonSingle,
+    remoteButtonDouble,
+    remoteButtonLong,
     timerDisplayMode,
     timerCorner,
     sidebarCollapsed,
@@ -3264,8 +3275,14 @@ export default function App() {
     if (window.electron?.remoteInput && remoteInputAvailable) window.electron.remoteInput.setDevice(remoteButtonDeviceId);
   }, [remoteButtonDeviceId, remoteInputAvailable]);
   useEffect(() => {
-    if (window.electron?.remoteInput && remoteInputAvailable) window.electron.remoteInput.setCommand(remoteButtonCommand);
-  }, [remoteButtonCommand, remoteInputAvailable]);
+    if (window.electron?.remoteInput && remoteInputAvailable) {
+      window.electron.remoteInput.setCommands({
+        single: remoteButtonSingle,
+        double: remoteButtonDouble,
+        long: remoteButtonLong,
+      });
+    }
+  }, [remoteButtonSingle, remoteButtonDouble, remoteButtonLong, remoteInputAvailable]);
 
   const bindRemoteButton = () => {
     if (!window.electron?.remoteInput) return;
@@ -5555,21 +5572,34 @@ export default function App() {
                         <div className="text-xs text-gray-400 mt-1">Click Bind, then press your remote's button once. Only that device fires the command — your mouse is ignored. (The press still left-clicks too, so keep the cursor parked.)</div>
                       </div>
                       <div>
-                        <label className="block text-sm mb-2">Fires command</label>
-                        <select
-                          value={remoteButtonCommand}
-                          onChange={(e) => setRemoteButtonCommand(e.target.value)}
-                          className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-sm"
-                        >
-                          <option value="play-pause">Play / Pause</option>
-                          <option value="next-chapter">Next chapter</option>
-                          <option value="prev-chapter">Previous chapter</option>
-                          <option value="reset">Reset to start</option>
-                          <option value="speed-up">Speed up</option>
-                          <option value="speed-down">Speed down</option>
-                          <option value="camera-liveview-toggle">Toggle live view</option>
-                          <option value="camera-record-toggle">Start/Stop recording</option>
-                        </select>
+                        <label className="block text-sm mb-2">Fires commands</label>
+                        <div className="space-y-2">
+                          {[
+                            { key: 'single', label: 'Single tap', value: remoteButtonSingle, set: setRemoteButtonSingle },
+                            { key: 'double', label: 'Double tap', value: remoteButtonDouble, set: setRemoteButtonDouble },
+                            { key: 'long', label: 'Long press', value: remoteButtonLong, set: setRemoteButtonLong },
+                          ].map((g) => (
+                            <div key={g.key} className="flex items-center gap-2">
+                              <span className="text-xs text-gray-400 w-20 shrink-0">{g.label}</span>
+                              <select
+                                value={g.value}
+                                onChange={(e) => g.set(e.target.value)}
+                                className="flex-1 bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-sm"
+                              >
+                                <option value="">None</option>
+                                <option value="play-pause">Play / Pause</option>
+                                <option value="next-chapter">Next chapter</option>
+                                <option value="prev-chapter">Previous chapter</option>
+                                <option value="reset">Reset to start</option>
+                                <option value="speed-up">Speed up</option>
+                                <option value="speed-down">Speed down</option>
+                                <option value="camera-liveview-toggle">Toggle live view</option>
+                                <option value="camera-record-toggle">Start/Stop recording</option>
+                              </select>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="text-xs text-gray-400 mt-1">Hold ~0.5s for a long press; two quick taps for double.</div>
                       </div>
                     </div>
                   )}

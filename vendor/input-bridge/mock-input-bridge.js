@@ -7,7 +7,7 @@
 //                        {"cmd":"__click","device":"..."}   // TEST HOOK: simulate a left-click
 //   helper -> Electron:  {"event":"ready"}
 //                        {"event":"bound","id":"..."}        // bind captured a device (now active)
-//                        {"event":"trigger"}                 // bound device left-clicked
+//                        {"event":"down"} / {"event":"up"}   // bound device left button
 
 'use strict';
 
@@ -40,9 +40,15 @@ function handle(msg) {
       if (bindTimer) { clearTimeout(bindTimer); bindTimer = null; }
       break;
 
-    case '__click':
-      // Test hook: a left-click from msg.device only triggers if it's the bound one.
-      if (msg.device && msg.device === boundDevice) emit({ event: 'trigger' });
+    // Test hooks: simulate the bound device's button (only the bound device counts).
+    case '__down':
+      if (msg.device && msg.device === boundDevice) emit({ event: 'down' });
+      break;
+    case '__up':
+      if (msg.device && msg.device === boundDevice) emit({ event: 'up' });
+      break;
+    case '__click': // convenience: a quick down + up
+      if (msg.device && msg.device === boundDevice) { emit({ event: 'down' }); emit({ event: 'up' }); }
       break;
 
     default:

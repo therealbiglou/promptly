@@ -425,7 +425,7 @@ contextBridge.exposeInMainWorld('electron', {
     bind: () => ipcRenderer.send('remote-input-bind'),
     setDevice: (id) => ipcRenderer.send('remote-input-set-device', id),
     clear: () => ipcRenderer.send('remote-input-clear'),
-    setCommand: (cmd) => ipcRenderer.send('remote-input-set-command', cmd),
+    setCommands: (cmds) => ipcRenderer.send('remote-input-set-commands', cmds),
 
     onStatus: (callback) => {
       const subscription = (event, status) => callback(status);

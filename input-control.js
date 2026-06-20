@@ -3,7 +3,10 @@
 // helper (mock now, C++ Raw Input later) speaks line-delimited JSON over stdio.
 //
 //   commands: set-device{id} / bind / clear
-//   events:   ready / bound{id} / trigger / error
+//   events:   ready / bound{id} / down / up / error
+//
+// The helper reports the bound device's left button down/up; this manager derives
+// the gesture (single tap / double tap / long press) from their timing.
 //
 // `spawn` is injected so the protocol/state logic is unit-testable without Electron.
 
@@ -16,12 +19,14 @@ class InputBridgeManager {
     this._spawn = opts.spawn;
     this._command = opts.command;
     this._args = opts.args || [];
-    this._onStatus = opts.onStatus || (() => {});   // ({available}) on availability change
-    this._onBound = opts.onBound || (() => {});      // (deviceId) when a bind completes
-    this._onTrigger = opts.onTrigger || (() => {});  // () when the bound device clicks
+    this._onStatus = opts.onStatus || (() => {});    // ({available}) on availability change
+    this._onBound = opts.onBound || (() => {});       // (deviceId) when a bind completes
+    this._onGesture = opts.onGesture || (() => {});   // ('single'|'double'|'long')
     this._onError = opts.onError || (() => {});
     this._log = opts.log || (() => {});
     this._backoff = opts.backoff || DEFAULT_BACKOFF_MS;
+    this._longMs = opts.longMs || 500;                // hold past this = long press
+    this._doubleMs = opts.doubleMs || 350;            // 2nd tap within this = double
 
     this._child = null;
     this._stopped = false;
@@ -30,6 +35,12 @@ class InputBridgeManager {
     this._respawnTimer = null;
     this._deviceId = opts.deviceId || null; // re-applied to the helper after each (re)spawn
     this._available = false;
+
+    // Gesture state machine
+    this._longTimer = null;
+    this._pendingSingleTimer = null;
+    this._longFired = false;
+    this._doubleInProgress = false;
   }
 
   isAvailable() { return this._available; }
@@ -40,6 +51,7 @@ class InputBridgeManager {
   stop() {
     this._stopped = true;
     if (this._respawnTimer) { clearTimeout(this._respawnTimer); this._respawnTimer = null; }
+    this._clearGestureTimers();
     if (this._child) { try { this._child.kill(); } catch (_) {} this._child = null; }
     this._setAvailable(false);
   }
@@ -111,8 +123,11 @@ class InputBridgeManager {
         this._deviceId = msg.id || null;
         this._onBound(this._deviceId);
         break;
-      case 'trigger':
-        this._onTrigger();
+      case 'down':
+        this._onButtonDown();
+        break;
+      case 'up':
+        this._onButtonUp();
         break;
       case 'error':
         this._log('input bridge error: ' + msg.message);
@@ -121,6 +136,43 @@ class InputBridgeManager {
       default:
         this._log('input bridge unknown event: ' + line);
     }
+  }
+
+  // ---- Gesture detection from the bound device's down/up events ----
+  // down -> start long-press timer (fires 'long' if still held). A second down
+  // before the single-click timer elapses is a 'double'. Otherwise, on the up,
+  // wait one double-window; if no second tap arrives, it was a 'single'.
+  _onButtonDown() {
+    if (this._pendingSingleTimer) {
+      clearTimeout(this._pendingSingleTimer);
+      this._pendingSingleTimer = null;
+      this._doubleInProgress = true;
+      this._onGesture('double');
+      return;
+    }
+    this._longFired = false;
+    this._longTimer = setTimeout(() => {
+      this._longTimer = null;
+      this._longFired = true;
+      this._onGesture('long');
+    }, this._longMs);
+  }
+
+  _onButtonUp() {
+    if (this._longTimer) { clearTimeout(this._longTimer); this._longTimer = null; }
+    if (this._doubleInProgress) { this._doubleInProgress = false; return; } // double already fired
+    if (this._longFired) { this._longFired = false; return; }               // long already fired
+    this._pendingSingleTimer = setTimeout(() => {
+      this._pendingSingleTimer = null;
+      this._onGesture('single');
+    }, this._doubleMs);
+  }
+
+  _clearGestureTimers() {
+    if (this._longTimer) { clearTimeout(this._longTimer); this._longTimer = null; }
+    if (this._pendingSingleTimer) { clearTimeout(this._pendingSingleTimer); this._pendingSingleTimer = null; }
+    this._longFired = false;
+    this._doubleInProgress = false;
   }
 
   _writeLine(obj) {

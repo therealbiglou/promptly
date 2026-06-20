@@ -1909,7 +1909,14 @@ ipcMain.handle('camera-get-status', () => cameraStatusForRenderer());
 // Remote Button (device-filtered input trigger via the Raw Input helper)
 // ============================================
 let inputBridge = null;
-let remoteButtonCommand = 'play-pause'; // what the bound device's click fires
+// What each cursor-button gesture fires (empty string = nothing).
+let remoteButtonCommands = { single: 'play-pause', double: '', long: '' };
+
+function fireRemoteButtonCommand(cmd) {
+  if (!cmd) return;
+  if (typeof cmd === 'string' && cmd.startsWith('camera-')) handleCameraCommand(cmd);
+  else if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('remote-command', { command: cmd });
+}
 
 function resolveInputBridge() {
   const dir = isDev
@@ -1940,15 +1947,9 @@ function startInputBridge() {
     onStatus: (s) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('remote-input-status', s); },
     onBound: (id) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('remote-input-bound', id); },
     onError: (msg) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('remote-input-error', msg); },
-    onTrigger: () => {
-      // Fire the configured command — camera commands route to the camera manager,
-      // everything else goes through the existing remote-command handler in the renderer.
-      const cmd = remoteButtonCommand;
-      if (typeof cmd === 'string' && cmd.startsWith('camera-')) {
-        handleCameraCommand(cmd);
-      } else if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('remote-command', { command: cmd });
-      }
+    onGesture: (gesture) => {
+      // single / double / long -> the command the user mapped to that gesture.
+      fireRemoteButtonCommand(remoteButtonCommands[gesture]);
     }
   });
   inputBridge.start();
@@ -1957,7 +1958,15 @@ function startInputBridge() {
 ipcMain.on('remote-input-bind', () => { if (inputBridge) inputBridge.bind(); });
 ipcMain.on('remote-input-set-device', (event, id) => { if (inputBridge) inputBridge.setDevice(id || null); });
 ipcMain.on('remote-input-clear', () => { if (inputBridge) inputBridge.clear(); });
-ipcMain.on('remote-input-set-command', (event, cmd) => { if (typeof cmd === 'string') remoteButtonCommand = cmd; });
+ipcMain.on('remote-input-set-commands', (event, cmds) => {
+  if (cmds && typeof cmds === 'object') {
+    remoteButtonCommands = {
+      single: cmds.single || '',
+      double: cmds.double || '',
+      long: cmds.long || ''
+    };
+  }
+});
 
 // Ensure GPU is enabled for transparency (especially on Windows)
 // These command line switches MUST be set before app.whenReady()

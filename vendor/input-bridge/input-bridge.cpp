@@ -6,7 +6,7 @@
 //   Electron -> helper:  {"cmd":"set-device","id":"<deviceName>"} | {"cmd":"bind"} | {"cmd":"clear"}
 //   helper -> Electron:  {"event":"ready"}
 //                        {"event":"bound","id":"<deviceName>"}   // bind captured a device
-//                        {"event":"trigger"}                     // bound device left-clicked
+//                        {"event":"down"} / {"event":"up"}       // bound device left button
 //
 // Device identity comes from RAWINPUTHEADER.hDevice -> RIDI_DEVICENAME (a stable
 // per-device path), which the renderer round-trips back via set-device.
@@ -100,14 +100,16 @@ static std::string extractJsonString(const std::string& line, const char* key) {
     return out;
 }
 
-static void onLeftButtonDown(const std::wstring& deviceName) {
+static void onLeftButton(const std::wstring& deviceName, bool down) {
     std::lock_guard<std::mutex> lk(g_state);
-    if (g_bindMode) {
+    if (down && g_bindMode) {
         g_bindMode = false;
         g_boundDevice = deviceName;
         emitBound(wideToUtf8(deviceName));
-    } else if (!g_boundDevice.empty() && deviceName == g_boundDevice) {
-        emitEvent("trigger");
+        return;
+    }
+    if (!g_boundDevice.empty() && deviceName == g_boundDevice) {
+        emitEvent(down ? "down" : "up"); // manager derives single/double/long from timing
     }
 }
 
@@ -119,9 +121,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             std::vector<BYTE> buf(size);
             if (GetRawInputData((HRAWINPUT)lParam, RID_INPUT, buf.data(), &size, sizeof(RAWINPUTHEADER)) == size) {
                 RAWINPUT* ri = reinterpret_cast<RAWINPUT*>(buf.data());
-                if (ri->header.dwType == RIM_TYPEMOUSE &&
-                    (ri->data.mouse.usButtonFlags & RI_MOUSE_LEFT_BUTTON_DOWN)) {
-                    onLeftButtonDown(getDeviceName(ri->header.hDevice));
+                if (ri->header.dwType == RIM_TYPEMOUSE) {
+                    const USHORT f = ri->data.mouse.usButtonFlags;
+                    // Both bits can appear in one report on a very fast click — handle each.
+                    if (f & RI_MOUSE_LEFT_BUTTON_DOWN) onLeftButton(getDeviceName(ri->header.hDevice), true);
+                    if (f & RI_MOUSE_LEFT_BUTTON_UP)   onLeftButton(getDeviceName(ri->header.hDevice), false);
                 }
             }
         }
