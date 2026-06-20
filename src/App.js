@@ -95,6 +95,7 @@ export default function App() {
   const [remoteButtonLong, setRemoteButtonLong] = useState('');
   const [remoteInputAvailable, setRemoteInputAvailable] = useState(false);
   const [remoteInputBinding, setRemoteInputBinding] = useState(false);
+  const [lastRemoteGesture, setLastRemoteGesture] = useState(null); // live diagnostic readout
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
   const [showRemote, setShowRemote] = useState(false);
   const [remoteServerActive, setRemoteServerActive] = useState(false);
@@ -2844,9 +2845,11 @@ export default function App() {
         }
       }
 
-      // Jump to the next chapter if it exists
+      // Jump to the next chapter, wrapping from the last chapter back to the first
       if (currentChapter < chapterPositions.length - 1) {
         jumpToChapter(currentChapter + 1);
+      } else if (chapterPositions.length > 0) {
+        jumpToChapter(0);
       }
     }
   };
@@ -2883,6 +2886,9 @@ export default function App() {
     if (isAtChapterStart && currentIndex > 0) {
       // At chapter start, go to previous chapter
       jumpToChapter(currentIndex - 1);
+    } else if (isAtChapterStart && currentIndex === 0 && chapterPositions.length > 0) {
+      // At the very first chapter's start, wrap to the last chapter
+      jumpToChapter(chapterPositions.length - 1);
     } else {
       // Not at chapter start, go to start of current chapter
       jumpToChapter(currentIndex);
@@ -3056,6 +3062,9 @@ export default function App() {
     if (isAtChapterStart && currentIndex > 0) {
       // At chapter start, go to previous chapter
       jumpToChapter(currentIndex - 1);
+    } else if (isAtChapterStart && currentIndex === 0 && chapterPositions.length > 0) {
+      // At the very first chapter's start, wrap to the last chapter
+      jumpToChapter(chapterPositions.length - 1);
     } else {
       // Not at chapter start, go to start of current chapter
       jumpToChapter(currentIndex);
@@ -3089,9 +3098,11 @@ export default function App() {
         }
       }
 
-      // Jump to the next chapter if it exists
+      // Jump to the next chapter, wrapping from the last chapter back to the first
       if (currentChapter < chapterPositions.length - 1) {
         jumpToChapter(currentChapter + 1);
+      } else if (chapterPositions.length > 0) {
+        jumpToChapter(0);
       }
     }
   };
@@ -3266,7 +3277,10 @@ export default function App() {
     const unsubStatus = window.electron.remoteInput.onStatus((s) => setRemoteInputAvailable(!!(s && s.available)));
     const unsubBound = window.electron.remoteInput.onBound((id) => { setRemoteButtonDeviceId(id || null); setRemoteInputBinding(false); });
     const unsubErr = window.electron.remoteInput.onError(() => setRemoteInputBinding(false));
-    return () => { unsubStatus && unsubStatus(); unsubBound && unsubBound(); unsubErr && unsubErr(); };
+    const unsubGesture = window.electron.remoteInput.onGesture
+      ? window.electron.remoteInput.onGesture((g) => setLastRemoteGesture({ gesture: g, at: Date.now() }))
+      : null;
+    return () => { unsubStatus && unsubStatus(); unsubBound && unsubBound(); unsubErr && unsubErr(); unsubGesture && unsubGesture(); };
   }, []);
 
   // Push the bound device + chosen command to the helper whenever they change, or
@@ -5551,6 +5565,7 @@ export default function App() {
                       Remote-button support is unavailable — the input helper isn't running.
                     </div>
                   ) : (
+                    <>
                     <div className="grid grid-cols-2 gap-4 items-start">
                       <div>
                         <label className="block text-sm mb-2">Bound device</label>
@@ -5602,6 +5617,19 @@ export default function App() {
                         <div className="text-xs text-gray-400 mt-1">Hold ~0.5s for a long press; two quick taps for double.</div>
                       </div>
                     </div>
+                    <div className="mt-3 text-xs flex items-center gap-2 flex-wrap">
+                      <span className="text-gray-400">Last press detected:</span>
+                      <span className="font-semibold text-purple-300">
+                        {lastRemoteGesture
+                          ? (lastRemoteGesture.gesture === 'single' ? 'Single tap'
+                            : lastRemoteGesture.gesture === 'double' ? 'Double tap'
+                            : lastRemoteGesture.gesture === 'long' ? 'Long press'
+                            : lastRemoteGesture.gesture)
+                          : '—'}
+                      </span>
+                      <span className="text-gray-500">(press your remote here to see what it actually sends)</span>
+                    </div>
+                    </>
                   )}
                 </div>
 
