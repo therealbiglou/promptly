@@ -95,7 +95,6 @@ export default function App() {
   const [remoteButtonLong, setRemoteButtonLong] = useState('');
   const [remoteInputAvailable, setRemoteInputAvailable] = useState(false);
   const [remoteInputBinding, setRemoteInputBinding] = useState(false);
-  const [lastRemoteGesture, setLastRemoteGesture] = useState(null); // live diagnostic readout
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
   const [showRemote, setShowRemote] = useState(false);
   const [remoteServerActive, setRemoteServerActive] = useState(false);
@@ -3277,10 +3276,7 @@ export default function App() {
     const unsubStatus = window.electron.remoteInput.onStatus((s) => setRemoteInputAvailable(!!(s && s.available)));
     const unsubBound = window.electron.remoteInput.onBound((id) => { setRemoteButtonDeviceId(id || null); setRemoteInputBinding(false); });
     const unsubErr = window.electron.remoteInput.onError(() => setRemoteInputBinding(false));
-    const unsubGesture = window.electron.remoteInput.onGesture
-      ? window.electron.remoteInput.onGesture((g) => setLastRemoteGesture({ gesture: g, at: Date.now() }))
-      : null;
-    return () => { unsubStatus && unsubStatus(); unsubBound && unsubBound(); unsubErr && unsubErr(); unsubGesture && unsubGesture(); };
+    return () => { unsubStatus && unsubStatus(); unsubBound && unsubBound(); unsubErr && unsubErr(); };
   }, []);
 
   // Push the bound device + chosen command to the helper whenever they change, or
@@ -5565,7 +5561,6 @@ export default function App() {
                       Remote-button support is unavailable — the input helper isn't running.
                     </div>
                   ) : (
-                    <>
                     <div className="grid grid-cols-2 gap-4 items-start">
                       <div>
                         <label className="block text-sm mb-2">Bound device</label>
@@ -5587,49 +5582,25 @@ export default function App() {
                         <div className="text-xs text-gray-400 mt-1">Click Bind, then press your remote's button once. Only that device fires the command — your mouse is ignored. (The press still left-clicks too, so keep the cursor parked.)</div>
                       </div>
                       <div>
-                        <label className="block text-sm mb-2">Fires commands</label>
-                        <div className="space-y-2">
-                          {[
-                            { key: 'single', label: 'Single tap', value: remoteButtonSingle, set: setRemoteButtonSingle },
-                            { key: 'double', label: 'Double tap', value: remoteButtonDouble, set: setRemoteButtonDouble },
-                            { key: 'long', label: 'Long press', value: remoteButtonLong, set: setRemoteButtonLong },
-                          ].map((g) => (
-                            <div key={g.key} className="flex items-center gap-2">
-                              <span className="text-xs text-gray-400 w-20 shrink-0">{g.label}</span>
-                              <select
-                                value={g.value}
-                                onChange={(e) => g.set(e.target.value)}
-                                className="flex-1 bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-sm"
-                              >
-                                <option value="">None</option>
-                                <option value="play-pause">Play / Pause</option>
-                                <option value="next-chapter">Next chapter</option>
-                                <option value="prev-chapter">Previous chapter</option>
-                                <option value="reset">Reset to start</option>
-                                <option value="speed-up">Speed up</option>
-                                <option value="speed-down">Speed down</option>
-                                <option value="camera-liveview-toggle">Toggle live view</option>
-                                <option value="camera-record-toggle">Start/Stop recording</option>
-                              </select>
-                            </div>
-                          ))}
-                        </div>
-                        <div className="text-xs text-gray-400 mt-1">Hold ~0.5s for a long press; two quick taps for double.</div>
+                        <label className="block text-sm mb-2">Fires command</label>
+                        <select
+                          value={remoteButtonSingle}
+                          onChange={(e) => setRemoteButtonSingle(e.target.value)}
+                          className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-sm"
+                        >
+                          <option value="">None</option>
+                          <option value="play-pause">Play / Pause</option>
+                          <option value="next-chapter">Next chapter</option>
+                          <option value="prev-chapter">Previous chapter</option>
+                          <option value="reset">Reset to start</option>
+                          <option value="speed-up">Speed up</option>
+                          <option value="speed-down">Speed down</option>
+                          <option value="camera-liveview-toggle">Toggle live view</option>
+                          <option value="camera-record-toggle">Start/Stop recording</option>
+                        </select>
+                        <div className="text-xs text-gray-400 mt-1">This button fires one command per press. For more buttons, map your remote's other keys under Keyboard Shortcuts.</div>
                       </div>
                     </div>
-                    <div className="mt-3 text-xs flex items-center gap-2 flex-wrap">
-                      <span className="text-gray-400">Last press detected:</span>
-                      <span className="font-semibold text-purple-300">
-                        {lastRemoteGesture
-                          ? (lastRemoteGesture.gesture === 'single' ? 'Single tap'
-                            : lastRemoteGesture.gesture === 'double' ? 'Double tap'
-                            : lastRemoteGesture.gesture === 'long' ? 'Long press'
-                            : lastRemoteGesture.gesture)
-                          : '—'}
-                      </span>
-                      <span className="text-gray-500">(press your remote here to see what it actually sends)</span>
-                    </div>
-                    </>
                   )}
                 </div>
 

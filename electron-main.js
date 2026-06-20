@@ -1943,18 +1943,12 @@ function startInputBridge() {
     }),
     command: b.command,
     args: b.args,
-    // BLE remotes add input latency, so give double-tap a roomy window.
-    longMs: 500,
-    doubleMs: 500,
     log: (m) => console.log('[input] ' + m),
     onStatus: (s) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('remote-input-status', s); },
     onBound: (id) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('remote-input-bound', id); },
     onError: (msg) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('remote-input-error', msg); },
     onGesture: (gesture) => {
-      // single / double / long -> the command the user mapped to that gesture.
-      // Always echo the detected gesture to the UI so the operator can confirm
-      // what the hardware actually produced (live diagnostic in settings).
-      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('remote-input-gesture', gesture);
+      // The button only single-clicks, so this always fires the single-tap command.
       fireRemoteButtonCommand(remoteButtonCommands[gesture]);
     }
   });

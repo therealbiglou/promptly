@@ -441,11 +441,6 @@ contextBridge.exposeInMainWorld('electron', {
       const subscription = (event, message) => callback(message);
       ipcRenderer.on('remote-input-error', subscription);
       return () => ipcRenderer.removeListener('remote-input-error', subscription);
-    },
-    onGesture: (callback) => {
-      const subscription = (event, gesture) => callback(gesture);
-      ipcRenderer.on('remote-input-gesture', subscription);
-      return () => ipcRenderer.removeListener('remote-input-gesture', subscription);
     }
   }
 });

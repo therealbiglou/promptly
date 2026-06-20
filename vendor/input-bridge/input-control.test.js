@@ -34,7 +34,6 @@ function makeManager(extra) {
     onBound: (id) => bound.push(id),
     onGesture: (g) => gestures.push(g),
     backoff: [5, 5, 5],
-    longMs: 40, doubleMs: 30,
   }, extra));
   return { mgr, status, bound, gestures, child: () => lastChild, written: () => lastChild._written.map((s) => JSON.parse(s.trim())) };
 }
@@ -65,42 +64,26 @@ test('bound event reports id and updates the stored device', () => {
   assert.strictEqual(h.mgr.getDeviceId(), 'DEV-XYZ');
 });
 
-// --- async gesture tests (self-reported; longMs=40, doubleMs=30) ---
-(() => {
+// The cursor button only produces single clicks, so each press fires 'single'
+// immediately on the 'down' (no double/long timing); 'up' is a no-op.
+test('press fires single immediately on down', () => {
   const h = makeManager();
   h.mgr.start();
   h.child().emitLine({ event: 'ready' });
   h.child().emitLine({ event: 'down' });
-  h.child().emitLine({ event: 'up' });
-  setTimeout(() => {
-    try { assert.deepStrictEqual(h.gestures, ['single']); passed++; console.log('  ok - single tap -> single'); }
-    catch (e) { process.exitCode = 1; console.error('  FAIL - single tap\n    ' + e.message); }
-  }, 70);
-})();
+  assert.deepStrictEqual(h.gestures, ['single']);
+  h.child().emitLine({ event: 'up' }); // completes the click, fires nothing more
+  assert.deepStrictEqual(h.gestures, ['single']);
+});
 
-(() => {
+test('two presses fire two singles', () => {
   const h = makeManager();
   h.mgr.start();
   h.child().emitLine({ event: 'ready' });
   h.child().emitLine({ event: 'down' }); h.child().emitLine({ event: 'up' });
-  h.child().emitLine({ event: 'down' }); h.child().emitLine({ event: 'up' }); // 2nd tap within window
-  setTimeout(() => {
-    try { assert.deepStrictEqual(h.gestures, ['double']); passed++; console.log('  ok - quick two taps -> double'); }
-    catch (e) { process.exitCode = 1; console.error('  FAIL - double tap\n    ' + e.message); }
-  }, 70);
-})();
-
-(() => {
-  const h = makeManager();
-  h.mgr.start();
-  h.child().emitLine({ event: 'ready' });
-  h.child().emitLine({ event: 'down' }); // hold (no up yet)
-  setTimeout(() => {
-    h.child().emitLine({ event: 'up' });
-    try { assert.deepStrictEqual(h.gestures, ['long']); passed++; console.log('  ok - held -> long'); }
-    catch (e) { process.exitCode = 1; console.error('  FAIL - long press\n    ' + e.message); }
-  }, 70); // > longMs (40)
-})();
+  h.child().emitLine({ event: 'down' }); h.child().emitLine({ event: 'up' });
+  assert.deepStrictEqual(h.gestures, ['single', 'single']);
+});
 
 test('bind / setDevice / clear write the right commands', () => {
   const h = makeManager();
