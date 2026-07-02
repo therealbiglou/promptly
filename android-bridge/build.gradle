@@ -1,0 +1,6 @@
+// Promptly Bridge — Android companion app that captures BLE remote input
+// (volume keys, media keys, synthetic touch swipes) and relays them to
+// Promptly's remote-control HTTP server as commands.
+plugins {
+    id 'com.android.application' version '8.4.2' apply false
+}

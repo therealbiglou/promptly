@@ -1,0 +1,30 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.promptly.bridge'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.promptly.bridge"
+        minSdk 26 // adaptive (vector) launcher icon — no binary assets in the repo
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+}
+
+// Intentionally no dependencies: plain framework widgets + HttpURLConnection.
+// Keeps the sideloaded APK tiny and the CLI build fast and reliable.

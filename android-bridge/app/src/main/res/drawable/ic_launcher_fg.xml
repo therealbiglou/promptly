@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Simple "P > " glyph: Promptly play/bridge mark -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M40,32 L40,76 L48,76 L48,60 L58,60 C67,60 72,54 72,46 C72,38 67,32 58,32 Z M48,39 L57,39 C61,39 64,42 64,46 C64,50 61,53 57,53 L48,53 Z" />
+</vector>
