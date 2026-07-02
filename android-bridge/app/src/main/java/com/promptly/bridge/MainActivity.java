@@ -98,6 +98,16 @@ public class MainActivity extends Activity {
     private boolean capturing = false;
     private final List<String> log = new ArrayList<>();
     private GestureDetector gestures;
+    /**
+     * Some remote buttons emit a key event AND a synthetic touch tap for one
+     * physical press. A touch gesture arriving within this window after any key
+     * event is that same press, so it's ignored — otherwise a "key+tap" button
+     * would also fire whatever command is mapped to plain "tap".
+     * onSingleTapConfirmed lags the touch by ~300ms (double-tap wait), so the
+     * window must comfortably cover key -> confirmed-tap.
+     */
+    private static final long TOUCH_SUPPRESS_MS = 700;
+    private long lastKeyEventMs = 0;
     /** Ordered eventId -> friendly label, defaults first then newly-seen. */
     private final Map<String, String> knownEvents = new LinkedHashMap<>();
 
@@ -116,15 +126,15 @@ public class MainActivity extends Activity {
 
         gestures = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
             @Override public boolean onDown(MotionEvent e) { return true; }
-            @Override public boolean onSingleTapConfirmed(MotionEvent e) { onRemoteEvent("tap"); return true; }
-            @Override public boolean onDoubleTap(MotionEvent e) { onRemoteEvent("double-tap"); return true; }
-            @Override public void onLongPress(MotionEvent e) { onRemoteEvent("long-press"); }
+            @Override public boolean onSingleTapConfirmed(MotionEvent e) { onGestureEvent("tap"); return true; }
+            @Override public boolean onDoubleTap(MotionEvent e) { onGestureEvent("double-tap"); return true; }
+            @Override public void onLongPress(MotionEvent e) { onGestureEvent("long-press"); }
             @Override public boolean onFling(MotionEvent e1, MotionEvent e2, float vx, float vy) {
                 if (e1 == null || e2 == null) return false;
                 float dx = e2.getX() - e1.getX(), dy = e2.getY() - e1.getY();
                 if (Math.abs(dx) < 60 && Math.abs(dy) < 60) return false; // too small to call a swipe
-                if (Math.abs(dy) >= Math.abs(dx)) onRemoteEvent(dy < 0 ? "swipe-up" : "swipe-down");
-                else onRemoteEvent(dx < 0 ? "swipe-left" : "swipe-right");
+                if (Math.abs(dy) >= Math.abs(dx)) onGestureEvent(dy < 0 ? "swipe-up" : "swipe-down");
+                else onGestureEvent(dx < 0 ? "swipe-left" : "swipe-right");
                 return true;
             }
         });
@@ -326,10 +336,22 @@ public class MainActivity extends Activity {
         }
         // Fire on first DOWN only; consume both DOWN and UP so the system never
         // acts on the key (this is what stops volume keys changing the volume).
+        // Any key activity (down, repeat, up — mapped or not) arms the touch
+        // suppression window, since a trailing synthetic tap belongs to this press.
+        lastKeyEventMs = android.os.SystemClock.uptimeMillis();
         if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
             onRemoteEvent("key:" + KeyEvent.keyCodeToString(code));
         }
         return true;
+    }
+
+    /** Touch-gesture events pass through here so key-adjacent ones can be dropped. */
+    private void onGestureEvent(String eventId) {
+        if (android.os.SystemClock.uptimeMillis() - lastKeyEventMs < TOUCH_SUPPRESS_MS) {
+            addLog(friendlyName(eventId) + "  →  ignored (same press as the key above)");
+            return;
+        }
+        onRemoteEvent(eventId);
     }
 
     @Override
