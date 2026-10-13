@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Play, Pause, Settings, FileText, Download, Upload, Edit2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronUp, ChevronDown, List, ListOrdered, Plus, GripVertical, Trash2, Maximize2, Eye, EyeOff, Monitor, Bold, Italic, Underline, Palette, AlertCircle, Timer, Zap, Scissors, Clock, Type, Droplet, Move, BookOpen, Target, Check, X, FileDown, ArrowUpDown, Crosshair, Gauge, Circle } from 'lucide-react';
+import { Play, Pause, Settings, FileText, Download, Upload, Edit2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronUp, ChevronDown, List, ListOrdered, Plus, GripVertical, Trash2, Maximize2, Eye, EyeOff, Monitor, Bold, Italic, Underline, Palette, AlertCircle, Timer, Zap, Scissors, Clock, Type, Droplet, Move, BookOpen, Target, Check, X, FileDown, ArrowUpDown, Crosshair, Gauge, Circle, FlipHorizontal2, FlipVertical2 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { jsPDF } from 'jspdf';
 
@@ -191,6 +191,9 @@ export default function App() {
   const [crosshairColor, setCrosshairColor] = useState('#ff0000');
   const [crosshairLength, setCrosshairLength] = useState(32);
   const [crosshairThickness, setCrosshairThickness] = useState(1);
+  // Mirror the presenter output (teleprompter glass reverses the image). Operator preview stays unflipped.
+  const [flipHorizontal, setFlipHorizontal] = useState(false);
+  const [flipVertical, setFlipVertical] = useState(false);
   const [countdownDuration, setCountdownDuration] = useState(0); // seconds; 0 = disabled
   const [countdownValue, setCountdownValue] = useState(null); // current count, or null when not active
   // True from the moment Play is pressed (countdown start) until playback actually
@@ -2588,6 +2591,8 @@ export default function App() {
         if (settings.crosshairColor !== undefined) setCrosshairColor(settings.crosshairColor);
         if (settings.crosshairLength !== undefined) setCrosshairLength(settings.crosshairLength);
         if (settings.crosshairThickness !== undefined) setCrosshairThickness(settings.crosshairThickness);
+        if (settings.flipHorizontal !== undefined) setFlipHorizontal(settings.flipHorizontal);
+        if (settings.flipVertical !== undefined) setFlipVertical(settings.flipVertical);
         if (settings.countdownDuration !== undefined) setCountdownDuration(settings.countdownDuration);
         if (settings.linkRecordingToPlayback !== undefined) setLinkRecordingToPlayback(settings.linkRecordingToPlayback);
         if (settings.remoteButtonDeviceId !== undefined) setRemoteButtonDeviceId(settings.remoteButtonDeviceId);
@@ -2646,6 +2651,8 @@ export default function App() {
       crosshairColor,
       crosshairLength,
       crosshairThickness,
+      flipHorizontal,
+      flipVertical,
       countdownDuration,
       linkRecordingToPlayback,
       remoteButtonDeviceId,
@@ -2674,6 +2681,8 @@ export default function App() {
     crosshairColor,
     crosshairLength,
     crosshairThickness,
+    flipHorizontal,
+    flipVertical,
     countdownDuration,
     linkRecordingToPlayback,
     remoteButtonDeviceId,
@@ -4130,6 +4139,8 @@ export default function App() {
 			crosshairColor,
 			crosshairLength,
 			crosshairThickness,
+			flipHorizontal,
+			flipVertical,
 			timerDisplayMode,
 			timerCorner,
 			presenterWidth: presenterWindowDimensions.width,
@@ -4240,7 +4251,7 @@ export default function App() {
     updatePresenterContent();
   }, [presenterWindow, currentScript, fontSize, fontColor, bgColor, lineHeight,
       horizontalMargin, leadInMargin, chapterSpacing, crosshairColor, crosshairLength,
-      crosshairThickness, timerDisplayMode, timerCorner]);
+      crosshairThickness, flipHorizontal, flipVertical, timerDisplayMode, timerCorner]);
       // NOTE: scrollProgress, scrollSpeed, activeScrollSpeed, elapsedTime, estimatedDuration
       // intentionally NOT in deps — those fast-changing values are pushed via the
       // lightweight update-presenter-timer IPC below so we don't rebuild the
@@ -6018,6 +6029,35 @@ export default function App() {
                   <Maximize2 size={16} />
                   {presenterFullscreen ? 'Full Screen ✓' : 'Full Screen'}
                 </button>
+              )}
+
+              {presenterWindow && !presenterWindow.closed && (
+                <>
+                  <button
+                    onClick={() => setFlipHorizontal(v => !v)}
+                    className={`px-3 py-2 rounded flex items-center gap-2 ${
+                      flipHorizontal
+                        ? 'bg-teal-500 hover:bg-teal-600 ring-2 ring-teal-300'
+                        : 'bg-gray-700 hover:bg-gray-600'
+                    }`}
+                    title={flipHorizontal ? "Presenter is mirrored left-right - click to restore" : "Mirror presenter left-right (for teleprompter glass)"}
+                  >
+                    <FlipHorizontal2 size={16} />
+                    {flipHorizontal ? 'Mirror H ✓' : 'Mirror H'}
+                  </button>
+                  <button
+                    onClick={() => setFlipVertical(v => !v)}
+                    className={`px-3 py-2 rounded flex items-center gap-2 ${
+                      flipVertical
+                        ? 'bg-teal-500 hover:bg-teal-600 ring-2 ring-teal-300'
+                        : 'bg-gray-700 hover:bg-gray-600'
+                    }`}
+                    title={flipVertical ? "Presenter is flipped top-bottom - click to restore" : "Flip presenter top-bottom"}
+                  >
+                    <FlipVertical2 size={16} />
+                    {flipVertical ? 'Mirror V ✓' : 'Mirror V'}
+                  </button>
+                </>
               )}
 
               {presenterWindow && !presenterWindow.closed && displays.length > 1 && (() => {
