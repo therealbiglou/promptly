@@ -4438,9 +4438,14 @@ export default function App() {
           style={{
             height: isPreview ? `${presenterWindowDimensions.height}px` : '100%',
             width: isPreview ? `${presenterWindowDimensions.width}px` : '100%',
-            ...getPreviewPadding(),
           }}
         >
+      {/* Paddings go on this wrapper, not the scroll container: top + bottom
+          padding exceed the container height, and padding on the container
+          itself forced its box taller than the viewport, capping the scroll
+          range so the last line stopped a full lead-in short of the crosshair.
+          Mirrors the same structure in electron-presenter.html. */}
+      <div style={getPreviewPadding()}>
       {currentScript?.chapters.map((chapter, index) => (
         <div key={chapter.id} data-chapter-index={index} id={`chapter-${index}`} style={{ marginBottom: `${fontSize * lineHeight * chapterSpacing}px` }}>
           {chapter.showTitle && (
@@ -4476,6 +4481,7 @@ export default function App() {
           />
         </div>
       ))}
+      </div>
         </div>
     );
   }), [currentScript, fontSize, fontColor, lineHeight, chapterSpacing, horizontalMargin, leadInMargin, presenterWindowDimensions]);

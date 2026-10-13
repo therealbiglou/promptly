@@ -855,8 +855,12 @@
 			} else {
 			  // Show and position spotlight
 			  spotlight.style.display = 'block';
-			  spotlight.style.left = position.x + 'px';
-			  spotlight.style.top = position.y + 'px';
+			  // The operator sends unflipped presenter pixels; mirror them so the
+			  // circle lands on the same words the operator is pointing at.
+			  const x = presenterFlipH ? window.innerWidth - position.x : position.x;
+			  const y = presenterFlipV ? window.innerHeight - position.y : position.y;
+			  spotlight.style.left = x + 'px';
+			  spotlight.style.top = y + 'px';
 			}
 		  }
 		});
@@ -963,13 +967,37 @@
 	  }
 	});
 
-    // Live-view feed mirror state — top-level so BOTH the IPC listener and
-    // updatePresenterContent can reach it (they live in different scopes).
-    let liveviewFlipH = false, liveviewFlipV = false;
-    function applyLiveviewTransform() {
-      const img = document.getElementById('liveview-img');
-      if (img) img.style.transform = 'scaleX(' + (liveviewFlipH ? -1 : 1) + ') scaleY(' + (liveviewFlipV ? -1 : 1) + ')';
+    // Presenter mirror state — top-level so the IPC listeners (spotlight, live view)
+    // and updatePresenterContent can all reach it. The script, countdown, timer
+    // stack and live-view feed are mirrored together so the whole frame reads
+    // correctly through the glass. The crosshair is symmetric, and the operator
+    // chrome (drag handle, fullscreen hint) is deliberately left unflipped.
+    let presenterFlipH = false, presenterFlipV = false, presenterCorner = 'top-left';
+    function flipTransform() {
+      return 'scaleX(' + (presenterFlipH ? -1 : 1) + ') scaleY(' + (presenterFlipV ? -1 : 1) + ')';
     }
+    // A fixed-position box mirrored about the viewport centre lands in the
+    // opposite corner, so the timer stack swaps corners as well as flipping.
+    function mirroredCorner(corner) {
+      let [v, h] = corner.split('-');
+      if (presenterFlipV) v = (v === 'top') ? 'bottom' : 'top';
+      if (presenterFlipH) h = (h === 'left') ? 'right' : 'left';
+      return v + '-' + h;
+    }
+    function applyFlipTransforms() {
+      const t = flipTransform();
+      ['presenter-scroll', 'countdown-overlay', 'liveview-img'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.style.transform = t;
+      });
+      const stack = document.getElementById('corner-stack');
+      if (stack) {
+        stack.style.transform = t;
+        stack.classList.remove('corner-top-left', 'corner-top-right', 'corner-bottom-left', 'corner-bottom-right');
+        stack.classList.add('corner-' + mirroredCorner(presenterCorner));
+      }
+    }
+    function applyLiveviewTransform() { applyFlipTransforms(); }
 
     function updatePresenterContent(data) {
       // Update background color
@@ -1001,12 +1029,9 @@
 
       // Apply timer overlay mode (timer-overlay) + corner (corner-stack, which also
       // carries the REC tally just below the timer).
-      const corner = data.timerCorner || 'top-left';
-      const cornerStack = document.getElementById('corner-stack');
-      if (cornerStack) {
-        cornerStack.classList.remove('corner-top-left', 'corner-top-right', 'corner-bottom-left', 'corner-bottom-right');
-        cornerStack.classList.add('corner-' + corner);
-      }
+      // The corner class itself is applied in applyFlipTransforms() below, since
+      // the mirror may move the stack to the opposite corner.
+      presenterCorner = data.timerCorner || 'top-left';
       const timerOverlay = document.getElementById('timer-overlay');
       if (timerOverlay) {
         const mode = data.timerDisplayMode || 'full';
@@ -1016,15 +1041,8 @@
 
       // Render chapters
       const scrollEl = document.getElementById('presenter-scroll');
-      const transform = `scaleX(${data.flipHorizontal ? -1 : 1}) scaleY(${data.flipVertical ? -1 : 1})`;
-
-      // Keep the live-view feed's mirror in sync with the teleprompter flip.
-      // Guarded: this is non-essential and must never block script rendering.
-      try {
-        liveviewFlipH = !!data.flipHorizontal;
-        liveviewFlipV = !!data.flipVertical;
-        applyLiveviewTransform();
-      } catch (e) { console.error('liveview flip sync failed', e); }
+      presenterFlipH = !!data.flipHorizontal;
+      presenterFlipV = !!data.flipVertical;
       
       let html = '';
       
@@ -1056,7 +1074,8 @@
         });
       }
       
-      scrollEl.innerHTML = html;
+      // Paddings live on an inner wrapper, NOT on the scroll container (see below).
+      scrollEl.innerHTML = '<div id="presenter-content">' + html + '</div>';
 
       // Calculate padding in pixels based on ACTUAL window dimensions (not passed data)
       // Use actual window dimensions to avoid stale dimension data on first load
@@ -1082,11 +1101,19 @@
       console.log('  - Bottom padding:', paddingBottomPx, 'px (halfHeight)');
       console.log('  - Horizontal margin:', data.horizontalMargin, '% =', paddingLeftPx, 'px each side');
 
-      scrollEl.style.paddingLeft = `${paddingLeftPx}px`;
-      scrollEl.style.paddingRight = `${paddingRightPx}px`;
-      scrollEl.style.paddingTop = `${paddingTopPx}px`;
-      scrollEl.style.paddingBottom = `${paddingBottomPx}px`;
-      scrollEl.style.transform = transform;
+      // Top + bottom padding together exceed the window height. Padding on the
+      // scroll container itself forced its box taller than the viewport, which
+      // (a) put the scaleY(-1) mirror pivot below the crosshair, so the lead-in
+      // was wrong when flipped vertically, and (b) capped the scroll range so the
+      // last line stopped a full lead-in short of the crosshair. Keeping the
+      // container exactly viewport-sized and padding the wrapper fixes both.
+      const contentEl = document.getElementById('presenter-content');
+      contentEl.style.padding = `${paddingTopPx}px ${paddingRightPx}px ${paddingBottomPx}px ${paddingLeftPx}px`;
+      scrollEl.style.padding = '0';
+
+      // Mirror the script and every talent-facing overlay together.
+      // Guarded: must never block script rendering.
+      try { applyFlipTransforms(); } catch (e) { console.error('flip transform failed', e); }
 
       // Timer overlay visibility/positioning handled by mode-* / corner-* classes
       // applied earlier in this function.
